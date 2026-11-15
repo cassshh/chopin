@@ -605,9 +605,9 @@ export function BuildPlanButton(
 		: look.kind === "stale" && look.build && canEdit
 		// Compact names what it builds; a phone's subtitle follows the status, which already says.
 		? { name: compact && !phone ? "Build changes" : "Build", run: build.rebuild }
-		// Tasks already made into issues can still be built on an agent: the press starts them.
+		// Tasks already made into issues can still be built on a machine: Approve plan starts them.
 		: look.kind === "issued" && look.build && canEdit && !machineOffline
-		? { name: "Build", run: build.press }
+		? { name: "Approve plan", run: build.approve }
 		: undefined;
 	let refused = action?.run === build.rebuild ? build.rebuildError : undefined;
 	let busy = build.busy || build.rebuilding;

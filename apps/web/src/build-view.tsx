@@ -302,6 +302,21 @@ export function BuildView(
 	let action: ReactNode;
 	function statusCard(): Card {
 		// Drafted tasks wait here for review; Approve plan approves exactly these and starts them.
+		// Handed off as GitHub issues: the parent issue shows below, and Approve plan still builds them.
+		if (look.kind === "issued") {
+			let count = snapshot?.graph?.definition.tasks.length ?? 0;
+			return {
+				title: "Handed off as issues",
+				count: plural(count, "task", "tasks"),
+				detail: (
+					<span>
+						{machineOffline
+							? `${machineOffline}. Approve plan builds these tasks on your machine once it is back.`
+							: "Each task is a GitHub issue now. Approve plan still builds them on your machine."}
+					</span>
+				),
+			};
+		}
 		if (look.kind === "review") {
 			return {
 				title: "Ready for review",
@@ -313,7 +328,7 @@ export function BuildView(
 							? "The tasks changed while you were reviewing them, so nothing was approved. Read them again, then approve."
 							: machineOffline
 							? `${machineOffline}. Approve plan builds these tasks once it is back, or on another machine you choose.`
-							: "Read the tasks below, then Approve plan builds them on your machine. Editing the document drafts them again."}
+							: "Read the tasks below. Approve plan builds them on your machine; Create issues hands them off as GitHub issues instead. Editing the document drafts them again."}
 					</span>
 				),
 			};
@@ -459,18 +474,20 @@ export function BuildView(
 	let when = buildAgo(shown, now);
 	let from = planSourceLine(shown);
 
-	if (look.kind === "review" && canEdit) {
+	if ((look.kind === "review" || look.kind === "issued") && canEdit) {
 		// An offline chosen machine holds approval here as it does in the header.
-		let blocked = look.blocked ?? machineOffline;
+		let blocked = (look.kind === "review" ? look.blocked : undefined) ?? machineOffline;
+		// Once the tasks are issues, building them is the second choice, not the first.
+		let primary = look.kind === "review";
 		action = (
 			<button
 				aria-busy={build.busy || undefined}
 				aria-disabled={blocked || build.busy ? true : undefined}
-				className={`btn btn-sm btn-primary shrink-0${
-					!look.blocked && machineOffline ? " machine-offline" : ""
+				className={`btn btn-sm ${primary ? "btn-primary" : "btn-outline"} shrink-0${
+					blocked && blocked === machineOffline ? " machine-offline" : ""
 				}`}
 				// Offline is said in the card's text above, as the header says it only to screen readers.
-				data-tooltip={look.blocked}
+				data-tooltip={look.kind === "review" ? look.blocked : undefined}
 				onClick={() => {
 					if (blocked || build.busy) return;
 					setActionError(undefined);

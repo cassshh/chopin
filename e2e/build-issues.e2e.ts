@@ -82,3 +82,30 @@ test("a built plan's tasks become GitHub issues with the assignee picked for eac
 		}),
 	).toHaveCount(2);
 });
+
+test("tasks under review can be handed off as issues instead, and still be approved later", async ({ seed, join: enter }) => {
+	await seed("# Export\n\nPeople can export a document.\n", { graph: graph() });
+	let page = await enter(`ana-${crypto.randomUUID().slice(0, 8)}`);
+	await expect(page.getByRole("button", { name: "Approve plan", exact: true })).toBeVisible();
+	await page.getByRole("group", { name: "Document view" })
+		.getByRole("button", { name: "Build", exact: true })
+		.click();
+	let view = page.getByRole("region", { name: "Build", exact: true });
+	await expect(view.getByText("Ready for review", { exact: true })).toBeVisible();
+	// The two ways on from review: build here, or hand off as issues.
+	await expect(view.getByRole("button", { name: "Approve plan", exact: true })).toBeVisible();
+	await view.getByRole("button", { name: "Create issues", exact: true }).click();
+	await view.getByRole("form").getByRole("button", { name: "Create 2 issues", exact: true })
+		.click();
+
+	await expect(view.getByText("Handed off as issues", { exact: true })).toBeVisible();
+	await expect(view.getByRole("link", { name: /^Parent issue #\d+$/ })).toBeVisible();
+	await expect(
+		view.getByRole("list", { name: "Tasks" }).getByRole("link", { name: /^Issue #\d+$/ }),
+	)
+		.toHaveCount(2);
+	// The header names the issues, with Approve plan as the second choice.
+	await expect(page.getByRole("button", { name: /^Issues in #\d+$/ })).toBeVisible();
+	await expect(page.getByRole("button", { name: "Approve plan", exact: true }).first())
+		.toBeVisible();
+});
