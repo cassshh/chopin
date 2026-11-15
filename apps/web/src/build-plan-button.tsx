@@ -131,10 +131,12 @@ export function useBuildPlan(
 		dispatch({ type: "reset" });
 	}, [room]);
 
-	// A built document counts its edits since the build, so edits reload it, throttled.
+	// A built document counts its edits since the build, and tasks under review go stale with the
+	// document, so edits reload it, throttled. This browser's own edits arrive as acks.
 	let built = !!snapshot && hasBuilt(snapshot);
+	let reviewing = !!snapshot && buildPhase(snapshot).kind === "review";
 	useEffect(() => {
-		if (!enabled || !built) return;
+		if (!enabled || !built && !reviewing) return;
 		let timer: number | undefined;
 		let edited = () => {
 			timer ??= window.setTimeout(() => {
@@ -147,7 +149,7 @@ export function useBuildPlan(
 			off.forEach(remove => remove?.());
 			window.clearTimeout(timer);
 		};
-	}, [enabled, built, wire]);
+	}, [enabled, built, reviewing, wire]);
 
 	// Whether the draft turn left tasks to start is only known from a fresh read.
 	let drafted = async () => {
