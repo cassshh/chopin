@@ -134,3 +134,37 @@ test("Approve plan can track the tasks as GitHub issues before it starts them", 
 	expect(snapshot.issues?.parent?.number).toEqual(expect.any(Number));
 	expect(Object.keys(snapshot.issues?.tasks ?? {}).sort()).toEqual(["button", "model"]);
 });
+
+test("issues made for older tasks offer Update issues, which brings the export up to date", async ({ seed, join: enter }) => {
+	// Both tasks have their issues, made for revision 1 of the tasks; the tasks are now at revision 2.
+	let seeded = graph();
+	seeded.versions[0]!.revision = 2;
+	let issue = (number: number) => ({
+		id: 9000 + number,
+		number,
+		url: `https://github.com/octo-org/score/issues/${number}`,
+	});
+	await seed("# Export\n\nPeople can export a document.\n", {
+		graph: seeded,
+		issues: {
+			graphNumber: 1,
+			graphRevision: 1,
+			by: "ana",
+			at: new Date().toISOString(),
+			parent: issue(800),
+			tasks: {
+				model: { issue: issue(801), linked: true },
+				button: { issue: issue(802), linked: true, blockedBy: ["model"] },
+			},
+		},
+	});
+	let page = await enter(`ana-${crypto.randomUUID().slice(0, 8)}`);
+	await page.getByRole("button", { name: "Review plan", exact: true }).click();
+	let view = page.getByRole("region", { name: "Build", exact: true });
+	// Nothing is missing, so there is nothing to create, only an update to send.
+	await expect(view.getByRole("button", { name: /Create (missing )?issues/ })).toHaveCount(0);
+	let update = view.getByRole("button", { name: "Update issues", exact: true });
+	await update.click();
+	await expect(update).toHaveCount(0);
+	await expect(view.getByText("Handed off as issues", { exact: true })).toBeVisible();
+});
