@@ -1200,6 +1200,12 @@ describe("build status", () => {
 		expect(look(snapshot({ issues: { ...issues, current: false } })).kind).toBe("review");
 		expect(look(snapshot({ issues: { ...issues, running: true } })).kind).toBe("review");
 		expect(look(snapshot({ issues, planRevision: 5 })).kind).not.toBe("issued");
+		// Approving stays held where review holds it, and the card says why.
+		expect(look(snapshot({ issues }), { connected: false })).toMatchObject({
+			kind: "issued",
+			build: false,
+			blocked: "Chopin isn’t connected",
+		});
 		// A task whose issue wasn't made keeps the tasks under review, with Create missing issues.
 		let partial = {
 			...issues,
