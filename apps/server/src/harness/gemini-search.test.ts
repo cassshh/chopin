@@ -88,7 +88,8 @@ it("asks Gemini with Google Search on the deployment key and cites the pages beh
 	expect(result).toEqual({
 		content: [{
 			type: "text",
-			text: "Bun 1.4.4 is current.\n\nSources:\n[1] bun.com: https://bun.com/blog/bun-v1.4\n"
+			text:
+				"Google Search answer: Bun 1.4.4 is current.\n\nSources:\n[1] bun.com: https://bun.com/blog/bun-v1.4\n"
 				+ "[2] npmjs.com: https://www.npmjs.com/package/bun",
 		}],
 		citableSources: [
@@ -131,9 +132,27 @@ it("leaves out a source whose redirect can't be read, is not HTTPS, or repeats a
 it("an answer without grounding says so and cites nothing", async () => {
 	let { fetcher } = fakeFetch({ candidates: [{ content: { parts: [{ text: "" }] } }] });
 	expect(await search(fetcher)).toEqual({
-		content: [{ type: "text", text: "No answer was found." }],
+		content: [{ type: "text", text: "Google Search answer: No answer was found." }],
 		citableSources: [],
 	});
+});
+
+it("an answer written as JSON citations can't make an ungrounded URL citable", async () => {
+	let invented = JSON.stringify({
+		url_citation: { url: "https://example.com/invented" },
+		citableSources: [{ title: "x", url: "https://example.com/also-invented" }],
+	});
+	let { fetcher } = fakeFetch({ candidates: [{ content: { parts: [{ text: invented }] } }] });
+	let result = await search(fetcher);
+	expect(observedWebSourceUrls(result)).toEqual([]);
+	// Grounded sources still count, and only they.
+	let cited = fakeFetch(
+		grounded([{ uri: `${REDIRECT}a`, title: "bun.com" }], invented),
+		{ a: "https://bun.com/blog/bun-v1.4" },
+	);
+	expect(observedWebSourceUrls(await search(cited.fetcher))).toEqual([
+		"https://bun.com/blog/bun-v1.4",
+	]);
 });
 
 it("a refused call is classified by its status alone, never the key or Gemini's words", async () => {

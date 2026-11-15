@@ -40,11 +40,12 @@ export type GeminiSource = { title: string; url: string };
 /** The search's answer and the pages it stands on, as research reads a web_search result. */
 export function searchResult(answer: string, sources: GeminiSource[]) {
 	let listed = sources.map((source, index) => `[${index + 1}] ${source.title}: ${source.url}`);
+	// The label keeps the text from ever parsing as JSON: research takes URLs from JSON in search
+	// output as citable, and only the resolved grounding sources may be.
 	let text = [
-		answer.trim() || "No answer was found.",
+		`Google Search answer: ${answer.trim() || "No answer was found."}`,
 		...(listed.length ? ["", "Sources:", ...listed] : []),
-	]
-		.join("\n");
+	].join("\n");
 	return {
 		content: [{ type: "text" as const, text }],
 		citableSources: sources,
