@@ -15,6 +15,7 @@ services:
       DECISIONS_MODEL: ${DECISIONS_MODEL}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       JEV_API_KEY: ${JEV_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
       APP_ORIGIN: ${APP_ORIGIN}
       PREVIOUS_ORIGINS: ${PREVIOUS_ORIGINS}
       DATABASE_URL: postgresql://chopin:chopin@${SERVICE_NAME_DB:-db}:5432/chopin?sslmode=disable
