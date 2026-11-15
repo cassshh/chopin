@@ -307,7 +307,10 @@ remembered with its presser and start (`unresolved`, at most 10, cleared once ev
 recorded). Before it makes anything, the next press lists each of those presser's own issues since
 their press and takes back, by its marker, any issue made but never recorded (its answer lost, or
 its save failed), so it is not made a second time, whoever presses again. Only those people's
-issues are looked at, so a marker someone else writes into an issue is never taken. A task ID
+issues are looked at, so a marker someone else writes into an issue is never taken. A listing that
+fails ends the press with nothing made, since it can't tell whether the issue exists. An export is
+refused while a build of the tasks is queued or running, and a build or a coding agent's claim
+waits while an export runs, so no build reads half-made issue links. A task ID
 longer than 128 characters, or `__proto__`, is refused before anything is kept, and a revised
 task keeps only the blocked-by links of its current dependencies. Issues already made for a task keep their link when the graph is revised and the
 task keeps its ID; edits to the task do not reach its issue. One export per document runs at a
