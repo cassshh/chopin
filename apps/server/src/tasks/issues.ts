@@ -13,6 +13,8 @@ import { z } from "zod";
 import { GitHubError } from "../github/client";
 import { exclusive, persistExclusive } from "../plan/service";
 import { announceImplementation } from "./notifications";
+import { buildActive } from "./builds";
+import { endExport, exporting, startExport } from "./exporting";
 import { unapprovedDecisions } from "./open-decisions";
 
 import type { GitHubAssignment, GitHubIssueBody, GitHubIssueRef } from "../github/client";
@@ -30,6 +32,10 @@ const MAX_FIELD = 12_000;
 export const MAX_EXPORTED_TASKS = 100;
 /** The longest task ID an export stores; `restoreIssues` refuses a longer one. */
 export const MAX_EXPORTED_TASK_ID = 128;
+/** Said when GitHub can't list the issues an earlier press may have made but not recorded. */
+export const RECOVERY_FAILED =
+	"Couldn't check GitHub for issues an earlier try may have made, so nothing new was made. Try again.";
+
 /** The most earlier presses whose unrecorded issues an export still looks for. */
 const MAX_UNRESOLVED = 10;
 
@@ -333,12 +339,7 @@ export type ExportContext = {
 	github: IssueWriter;
 };
 
-/** Channels with an export under way in this process; a second press waits for the first. */
-let running = new Set<string>();
-
-export function exporting(channelId: string): boolean {
-	return running.has(channelId);
-}
+export { exporting };
 
 /** Commit a change to the export, or refuse when the graph it was made for has moved on. */
 async function commit(
@@ -388,8 +389,8 @@ async function step(
 
 /**
  * The parent and task issues an earlier press made but did not record, found by the marker at the
- * end of their bodies among the presser's issues since that press. A listing that fails finds
- * nothing, as before there was one.
+ * end of their bodies among each earlier presser's issues since their press. Throws when a
+ * listing fails.
  */
 async function recover(
 	context: ExportContext,
@@ -406,10 +407,10 @@ async function recover(
 	// Each earlier presser's own issues since their press, with a minute's slack for a clock GitHub
 	// and this server disagree on. Only those, so an issue someone else wrote the marker into is
 	// never taken.
+	// A listing that fails proves nothing about what is there, so it ends the press rather than
+	// making an issue that may already exist.
 	let listed = (await Promise.all(
-		presses.map(press =>
-			issuesBy(press.by, new Date(Date.parse(press.at) - 60_000).toISOString()).catch(() => [])
-		),
+		presses.map(press => issuesBy(press.by, new Date(Date.parse(press.at) - 60_000).toISOString())),
 	)).flat();
 	let ended = (body: string, marker: string) => body.trimEnd().endsWith(marker);
 	// Oldest first, so the first issue made for a task is the one kept.
@@ -453,14 +454,13 @@ export async function exportIssues(
 		assignees: Record<string, string | null>;
 	},
 ): Promise<IssueExport> {
-	if (running.has(context.channelId)) {
+	if (!startExport(context.channelId)) {
 		throw new GitHubError("issues are already being created for this document", 409);
 	}
-	running.add(context.channelId);
 	try {
 		return await run(context, input);
 	} finally {
-		running.delete(context.channelId);
+		endExport(context.channelId);
 		await context.withPlan(async plan => announceImplementation(plan)).catch(() => {});
 	}
 }
@@ -481,6 +481,14 @@ async function run(
 			let graph = latest(plan);
 			if (graph.number !== input.graphNumber || graph.revision !== input.graphRevision) {
 				throw new GitHubError("the tasks have changed; reload and try again", 409);
+			}
+			// A build being started or run has these tasks; issues made now could hand them to
+			// someone else too, and the build would read half their links.
+			if (buildActive(plan)) {
+				throw new GitHubError(
+					"a build of these tasks is under way; create issues once it ends",
+					409,
+				);
 			}
 			if (graph.definition.tasks.length > MAX_EXPORTED_TASKS) {
 				throw new GitHubError(`at most ${MAX_EXPORTED_TASKS} tasks can become issues`, 409);
@@ -561,7 +569,15 @@ async function run(
 	// A press after one that left something unmade first finds, by marker, any issue an earlier
 	// press made but could not record, among its own presser's issues, so it is never made twice.
 	if (current.unresolved && missing) {
-		let found = await recover(context, tasks, current, current.unresolved);
+		let unresolved = current.unresolved;
+		let found;
+		try {
+			found = await recover(context, tasks, current, unresolved);
+		} catch (error) {
+			let problem = RECOVERY_FAILED;
+			await save(issues => void (issues.problem = problem));
+			throw new GitHubError(problem, error instanceof GitHubError ? error.status : 502);
+		}
 		if (found.parent || found.tasks.size > 0) {
 			await save(issues => {
 				if (found.parent && !issues.parent) issues.parent = found.parent;
