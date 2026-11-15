@@ -729,7 +729,11 @@ export type BuildLook =
 	 * The tasks were made into GitHub issues under `parent` and nothing was built; `build` offers
 	 * building them on an agent all the same.
 	 */
-	| { kind: "issued"; parent: number; tip: string; build: boolean };
+	/**
+	 * Tasks made into issues and not built: `build` offers Approve plan beside them, and `blocked`
+	 * says why approving is held, as review's does.
+	 */
+	| { kind: "issued"; parent: number; tip: string; build: boolean; blocked?: string };
 
 export type BuildContext = {
 	state: FirstBuild;
@@ -933,6 +937,7 @@ export function buildLook(snapshot: Snapshot | undefined, context: BuildContext)
 			parent: issues.parent.number,
 			tip: `These tasks are GitHub issues under #${issues.parent.number}`,
 			build: context.canEdit && !blocked,
+			...(blocked ? { blocked } : {}),
 		};
 	}
 	if (phase.kind === "review") {

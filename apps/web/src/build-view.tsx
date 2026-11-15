@@ -479,7 +479,7 @@ export function BuildView(
 
 	if ((look.kind === "review" || look.kind === "issued") && canEdit) {
 		// An offline chosen machine holds approval here as it does in the header.
-		let blocked = (look.kind === "review" ? look.blocked : undefined) ?? machineOffline;
+		let blocked = look.blocked ?? machineOffline;
 		// Once the tasks are issues, building them is the second choice, not the first.
 		let primary = look.kind === "review";
 		let approveAndTrack = async () => {
@@ -518,7 +518,7 @@ export function BuildView(
 					blocked && blocked === machineOffline ? " machine-offline" : ""
 				}`}
 				// Offline is said in the card's text above, as the header says it only to screen readers.
-				data-tooltip={look.kind === "review" ? look.blocked : undefined}
+				data-tooltip={look.blocked}
 				onClick={() => {
 					if (blocked || build.busy || creating) return;
 					setActionError(undefined);
