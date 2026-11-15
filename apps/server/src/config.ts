@@ -71,6 +71,12 @@ export type Config = {
 	backgroundJobs: boolean;
 	webResearch: boolean;
 	/**
+	 * Who answers public web research's web_search: GitHub's Copilot MCP tool with the person's
+	 * token (`copilot`, the default), or Gemini with Google Search grounding on the deployment's
+	 * GEMINI_API_KEY (`WEB_SEARCH_PROVIDER=gemini`, model `WEB_SEARCH_MODEL`).
+	 */
+	webSearch: WebSearchConfig;
+	/**
 	 * What a Chat message may carry, as configured: `CHAT_ATTACHMENT_MAX_BYTES` for one file,
 	 * `CHAT_ATTACHMENT_MAX_COUNT` files per message (0 turns files off) and
 	 * `CHAT_ATTACHMENT_MAX_TOTAL_BYTES` for all of a message's. Under `HARNESS=remote` the limits in
@@ -432,6 +438,7 @@ export function load(): Config {
 	}
 	let selection = harnessSelection();
 	let serverPort = port();
+	let webSearch = webSearchConfig();
 	return {
 		...selection,
 		port: serverPort,
@@ -445,6 +452,7 @@ export function load(): Config {
 		agent,
 		backgroundJobs,
 		webResearch: agent && backgroundJobs && process.env.WEB_RESEARCH !== "off",
+		webSearch,
 		chatAttachments: chatAttachments(),
 		transcription: transcription(),
 		researchEvidenceTimeoutMs: researchEvidenceTimeoutMs(),
@@ -500,7 +508,11 @@ export function describe(config: Config): string {
 			? [`Planner extensions: ${config.harnessExtensions.join(", ")}`]
 			: []),
 		config.backgroundJobs ? "background jobs: on" : "background jobs: off",
-		config.webResearch ? "web research: on" : "web research: off",
+		config.webResearch
+			? config.webSearch.provider === "gemini"
+				? `web research: on (Gemini Google Search, ${config.webSearch.model}, on GEMINI_API_KEY)`
+				: "web research: on"
+			: "web research: off",
 		config.conversationPlan
 			? `conversation plan: ${config.decisionsModel}`
 			: "conversation plan: off",
@@ -516,4 +528,25 @@ export function describe(config: Config): string {
 	// One setting per line, so the log never needs a separator glyph.
 	return [`chopin http://${config.host}:${config.port}`, ...parts.map(part => `  ${part}`)]
 		.join("\n");
+}
+
+export type WebSearchConfig =
+	| { provider: "copilot" }
+	| { provider: "gemini"; apiKey: string; model: string };
+
+export const DEFAULT_WEB_SEARCH_MODEL = "gemini-3.8-flash";
+
+function webSearchConfig(): WebSearchConfig {
+	let provider = process.env.WEB_SEARCH_PROVIDER || "copilot";
+	if (provider === "copilot") return { provider };
+	if (provider !== "gemini") {
+		throw new Error("WEB_SEARCH_PROVIDER must be copilot or gemini");
+	}
+	let apiKey = process.env.GEMINI_API_KEY;
+	if (!apiKey) throw new Error("WEB_SEARCH_PROVIDER=gemini needs GEMINI_API_KEY");
+	let model = process.env.WEB_SEARCH_MODEL || DEFAULT_WEB_SEARCH_MODEL;
+	if (!/^[a-z0-9][a-z0-9.-]{0,63}$/.test(model)) {
+		throw new Error("WEB_SEARCH_MODEL must be a Gemini model name, such as gemini-3.8-flash");
+	}
+	return { provider, apiKey, model };
 }
