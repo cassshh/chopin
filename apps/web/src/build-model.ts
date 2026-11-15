@@ -969,9 +969,16 @@ export function retryAction(look: BuildLook): "Retry" | undefined {
 	return (look.kind === "stopped" || look.kind === "agent") && look.retry ? "Retry" : undefined;
 }
 
-/** Build opens once there is a build, tasks to review, or a press under way, to show. */
+/**
+ * Build opens once there is a build, tasks to review (out of date ones included, so a person can
+ * see what an edit left behind), or a press under way, to show.
+ */
 export function buildTabReady(snapshot: Snapshot | undefined, look: BuildLook): boolean {
-	return look.kind !== "plan" || !!snapshot && hasBuilt(snapshot);
+	if (look.kind !== "plan") return true;
+	if (!snapshot) return false;
+	let staleTasks = buildPhase(snapshot).kind === "drafting"
+		&& (snapshot.graph?.definition.tasks.length ?? 0) > 0;
+	return hasBuilt(snapshot) || staleTasks;
 }
 
 /** A running build as Chat shows it, in a card under its transcript. */

@@ -26,6 +26,7 @@ import {
 } from "./build-model";
 import { ApiError } from "./api";
 import { cancelBuildRequest, rebuildChanges, startBuild } from "./build-start";
+import type { Reviewed } from "./build-start";
 import { useImplementationSnapshot } from "./implementation-snapshot";
 import { BuildBlockerGlyph } from "./build-blocker-glyph";
 import { buildBlockerSummary } from "./build-blockers";
@@ -70,6 +71,11 @@ export type BuildPlan = {
 	approve: () => void;
 	/** Retry after a first build stopped: start the tasks again, or draft them when there are none. */
 	retry: () => void;
+	/**
+	 * The last Approve plan found the tasks changed since they were shown, so it approved nothing:
+	 * they must be reviewed again.
+	 */
+	reviewChanged: boolean;
 	/** Build the changes since the last build, or retry a failed one. */
 	rebuild: () => void;
 	/** Why the last Build or Retry of changes was refused. */
@@ -123,6 +129,9 @@ export function useBuildPlan(
 	});
 	let [state, dispatch] = useReducer(advanceFirstBuild, { stage: "idle" } as FirstBuild);
 	let [rebuilding, setRebuilding] = useState(false);
+	// What the person saw when they pressed Approve plan; the start approves exactly that.
+	let reviewed = useRef<Reviewed>(undefined);
+	let [reviewChanged, setReviewChanged] = useState(false);
 	let [rebuildError, setRebuildError] = useState<string>();
 	let [rebuildNeedsAgent, setRebuildNeedsAgent] = useState(false);
 	let draftId = useRef<string>(undefined);
@@ -211,7 +220,9 @@ export function useBuildPlan(
 		}
 		if (!snapshot) return;
 		dispatch({ type: "start" });
-		startBuild(room, snapshot).then(result => {
+		let approving = reviewed.current;
+		reviewed.current = undefined;
+		startBuild(room, snapshot, approving).then(result => {
 			if (result === "started") {
 				dispatch({ type: "started" });
 				reload();
@@ -247,6 +258,39 @@ export function useBuildPlan(
 			setRebuildNeedsAgent(false);
 		}
 	}, [look.kind]);
+	/**
+	 * Approve exactly the tasks on screen. A fresh read that finds them changed (revised by the
+	 * Planner or a teammate, or made stale by an edit) approves nothing and asks for review again;
+	 * the server refuses the start too if they change between the read and the request.
+	 */
+	let approve = () => {
+		let shownGraph = snapshot?.graph;
+		if (!snapshot || !shownGraph) return;
+		let shown: Reviewed = {
+			planRevision: snapshot.planRevision,
+			graphVersion: shownGraph.number,
+			graphRevision: shownGraph.revision,
+		};
+		setReviewChanged(false);
+		let go = () => {
+			reviewed.current = shown;
+			dispatch({ type: "approve" });
+		};
+		read().then(fresh => {
+			let graph = fresh.graph;
+			if (
+				!graph || fresh.planRevision !== shown.planRevision
+				|| graph.number !== shown.graphVersion || graph.revision !== shown.graphRevision
+			) {
+				setReviewChanged(true);
+				return;
+			}
+			go();
+		}, go);
+	};
+	useEffect(() => {
+		if (look.kind !== "review") setReviewChanged(false);
+	}, [look.kind]);
 	return {
 		snapshot,
 		loadError,
@@ -258,15 +302,13 @@ export function useBuildPlan(
 			// The press drafts against the latest revision, never a stale read.
 			void read().catch(() => {}).finally(() => dispatch({ type: "press" }));
 		},
-		approve() {
-			// Approves the tasks of the latest read; tasks an edit made stale are refused.
-			void read().catch(() => {}).finally(() => dispatch({ type: "approve" }));
-		},
+		approve,
 		retry() {
 			let phase = buildPhase(snapshot);
-			const type = phase.kind === "review" || phase.kind === "failed" ? "approve" : "press";
-			void read().catch(() => {}).finally(() => dispatch({ type }));
+			if (phase.kind === "review" || phase.kind === "failed") approve();
+			else void read().catch(() => {}).finally(() => dispatch({ type: "press" }));
 		},
+		reviewChanged,
 		rebuild() {
 			if (rebuilding) return;
 			setRebuilding(true);

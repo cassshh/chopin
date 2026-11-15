@@ -117,6 +117,7 @@ export function BuildView(
 		build,
 		canEdit,
 		comments,
+		machineOffline,
 		onShowDocument,
 		room,
 		userId,
@@ -124,6 +125,8 @@ export function BuildView(
 		active: boolean;
 		build: BuildPlan;
 		canEdit: boolean;
+		/** The chosen machine is offline, named: Approve plan waits for it, as in the header. */
+		machineOffline?: string;
 		/** Accepted comments the document has not yet taken in. */
 		comments: number;
 		onShowDocument: () => void;
@@ -230,8 +233,11 @@ export function BuildView(
 				// An element, not a string: a sentence this long wraps instead of fading in on one line.
 				detail: look.blocked ?? (
 					<span>
-						Read the tasks below, then Approve plan builds them on your machine. Editing the
-						document drafts them again.
+						{build.reviewChanged
+							? "The tasks changed while you were reviewing them, so nothing was approved. Read them again, then approve."
+							: machineOffline
+							? `${machineOffline}. Approve plan builds these tasks once it is back, or on another machine you choose.`
+							: "Read the tasks below, then Approve plan builds them on your machine. Editing the document drafts them again."}
 					</span>
 				),
 			};
@@ -378,13 +384,17 @@ export function BuildView(
 	let from = planSourceLine(shown);
 
 	if (look.kind === "review" && canEdit) {
-		let blocked = look.blocked;
+		// An offline chosen machine holds approval here as it does in the header.
+		let blocked = look.blocked ?? machineOffline;
 		action = (
 			<button
 				aria-busy={build.busy || undefined}
 				aria-disabled={blocked || build.busy ? true : undefined}
-				className="btn btn-sm btn-primary shrink-0"
-				data-tooltip={blocked}
+				className={`btn btn-sm btn-primary shrink-0${
+					!look.blocked && machineOffline ? " machine-offline" : ""
+				}`}
+				// Offline is said in the card's text above, as the header says it only to screen readers.
+				data-tooltip={look.blocked}
 				onClick={() => {
 					if (blocked || build.busy) return;
 					setActionError(undefined);

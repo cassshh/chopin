@@ -1118,6 +1118,10 @@ describe("build status", () => {
 	it("opens Build only once there is a build, tasks to review, or a press under way", () => {
 		let untasked = snapshot({ graph: undefined });
 		expect(buildTabReady(untasked, look(untasked))).toBe(false);
+		// Tasks an edit put out of date stay readable, though Build plan has to draft them again.
+		let stale = snapshot({ planRevision: 5 });
+		expect(look(stale).kind).toBe("plan");
+		expect(buildTabReady(stale, look(stale))).toBe(true);
 		let pressed = { stage: "drafting", sent: false } as const;
 		expect(buildTabReady(snapshot(), look(snapshot(), { state: pressed }))).toBe(true);
 		let returned = snapshot({
