@@ -203,7 +203,7 @@ export function endedReason(build: { error?: string } | undefined): string | und
 	}
 }
 
-const AGAIN = "Build plan builds it again.";
+const AGAIN = "Build plan drafts it again for review.";
 const UNFINISHED = "The build stopped before it finished.";
 
 /** `text` as a sentence, ending with one full stop unless it ends a sentence already. */
@@ -552,12 +552,14 @@ export function hasBuilt(snapshot: Snapshot): boolean {
 }
 
 /**
- * The header's one-click first build: draft the tasks, then start them, with
- * no review in between. `failed` keeps the button so a person can try again;
- * `agent` says the last start found no local agent to run it.
+ * The header's first build, in two presses: Build plan drafts the tasks and stops for review,
+ * then Approve plan (`approving`) approves exactly those tasks and starts them. `failed` keeps
+ * the button so a person can try again; `agent` says the last start found no local agent to run it.
  */
 export type FirstBuild =
 	| { stage: "idle" }
+	/** Approve plan was pressed: start the reviewed tasks. */
+	| { stage: "approving" }
 	/** `redrafted` once an edit during the first draft made it stale and it was asked again. */
 	| { stage: "drafting"; sent: boolean; redrafted?: boolean }
 	/** The draft raised a blocker, or a reload found the request: continue once it clears. */
@@ -568,6 +570,8 @@ export type FirstBuild =
 
 export type FirstBuildEvent =
 	| { type: "press" }
+	/** Approve plan: approve the reviewed tasks and start them. */
+	| { type: "approve" }
 	/** The server still holds this viewer's one-click request, e.g. after a reload. */
 	| { type: "resume" }
 	/** The draft left the document blocked; keep the intent until the blockers clear. */
@@ -590,6 +594,8 @@ export function advanceFirstBuild(state: FirstBuild, event: FirstBuildEvent): Fi
 			return state.stage === "idle" || state.stage === "failed"
 				? { stage: "drafting", sent: false }
 				: state;
+		case "approve":
+			return state.stage === "idle" || state.stage === "failed" ? { stage: "approving" } : state;
 		case "resume":
 			return state.stage === "idle" ? { stage: "waiting" } : state;
 		case "wait":
@@ -618,6 +624,7 @@ export function advanceFirstBuild(state: FirstBuild, event: FirstBuildEvent): Fi
 			return state.stage === "drafting" ? { stage: "failed", message: event.message } : state;
 		case "start":
 			return state.stage === "drafting" || state.stage === "waiting" || state.stage === "failed"
+					|| state.stage === "approving"
 				? { stage: "starting" }
 				: state;
 		case "started":
@@ -635,11 +642,12 @@ export function advanceFirstBuild(state: FirstBuild, event: FirstBuildEvent): Fi
  * Whether Build plan's press is still under way, and the one step the browser
  * should take next, if any.
  *
- * Once pressed it reads as `working` until the build runs or the attempt ends;
- * `reset` hands any later state back to the snapshot. A draft that raises a
- * blocker does not drop the press: it reads `waiting` until the blockers
- * clear, then drafts again if the tasks are stale and starts them. The server
- * keeps the press (`buildRequested`), so a reload `resume`s it. A build that
+ * Build plan's press reads as `working` until its draft lands for review, then
+ * hands back to the snapshot (`reset`) so the tasks wait for Approve plan.
+ * Approve plan starts them. A draft that raises a blocker does not drop the
+ * press: it reads `waiting` until the blockers clear, then drafts again if the
+ * tasks are stale. A one-click request an older client left on the server
+ * (`buildRequested`) is still resumed and started after a reload. A build that
  * failed before it claimed its tasks starts again from the same tasks.
  */
 export function firstBuildStep(
@@ -663,6 +671,11 @@ export function firstBuildStep(
 		return { view: phase.kind === "blocked" ? "waiting" : "working", next: "resume" };
 	}
 	if (state.stage === "idle" || state.stage === "failed") return { view: "idle" };
+	if (state.stage === "approving") {
+		return phase.kind === "review" || phase.kind === "failed"
+			? { view: "working", next: "start" }
+			: { view: "idle", next: "reset" };
+	}
 	if (state.stage === "starting") return { view: "working" };
 	if (state.stage === "started") {
 		return phase.kind === "review" ? { view: "working" } : { view: "idle", next: "reset" };
@@ -675,7 +688,9 @@ export function firstBuildStep(
 		if (phase.kind === "review") return { view: "working", next: "start" };
 		return { view: "idle", next: "reset" };
 	}
-	if (phase.kind === "review" || phase.kind === "failed") return { view: "working", next: "start" };
+	// Build plan's draft is ready: it waits for review and Approve plan, never starting by itself.
+	if (phase.kind === "review") return { view: "idle", next: "reset" };
+	if (phase.kind === "failed") return { view: "working", next: "start" };
 	if (phase.kind === "drafting") {
 		return { view: "working", ...(state.sent ? {} : { next: "draft" }) };
 	}
@@ -692,6 +707,8 @@ export function firstBuildStep(
  */
 export type BuildLook =
 	| { kind: "plan"; blocked?: string }
+	/** Drafted tasks wait for review: Approve plan approves and starts them, unless `blocked`. */
+	| { kind: "review"; tasks: number; tip: string; blocked?: string }
 	| { kind: "tasks"; tip: string }
 	| { kind: "building"; done: number; total: number; tip?: string }
 	| { kind: "stopped"; tip: string; retry: boolean }
@@ -890,6 +907,19 @@ export function buildLook(snapshot: Snapshot | undefined, context: BuildContext)
 			retry,
 		};
 	}
+	if (phase.kind === "review") {
+		let tasks = snapshot.graph?.definition.tasks.length ?? 0;
+		// Starting drafted tasks needs no Planner; only the connection and readiness hold it.
+		let blocked = !context.connected ? "Chopin isn’t connected" : blockerReason(snapshot);
+		return {
+			kind: "review",
+			tasks,
+			tip: `Review the ${
+				plural(tasks, "task", "tasks")
+			} in Build, then approve the plan to start building`,
+			...(blocked ? { blocked } : {}),
+		};
+	}
 	return { kind: "plan", blocked: planBlocker(snapshot, context) };
 }
 
@@ -908,6 +938,8 @@ export function buildLabel(look: BuildLook): string {
 	switch (look.kind) {
 		case "plan":
 			return "Build plan";
+		case "review":
+			return "Approve plan";
 		case "tasks":
 			return "Preparing tasks";
 		case "building":
@@ -937,7 +969,7 @@ export function retryAction(look: BuildLook): "Retry" | undefined {
 	return (look.kind === "stopped" || look.kind === "agent") && look.retry ? "Retry" : undefined;
 }
 
-/** Build opens once there is a build, or a press under way, to show. */
+/** Build opens once there is a build, tasks to review, or a press under way, to show. */
 export function buildTabReady(snapshot: Snapshot | undefined, look: BuildLook): boolean {
 	return look.kind !== "plan" || !!snapshot && hasBuilt(snapshot);
 }
