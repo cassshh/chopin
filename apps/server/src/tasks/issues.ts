@@ -5,8 +5,9 @@
  *
  * GitHub is written first and the result committed after each step, so a step that failed, or a
  * process that stopped, is resumed by pressing again: an issue Chopin recorded is never created
- * twice. An answer lost after GitHub created an issue can still leave a duplicate; every body
- * carries a hidden marker naming its document and task to find it by.
+ * twice. Every body ends with a hidden marker naming its document and task, so an issue whose
+ * creation answer was lost, or whose reference could not be saved, is found again by the next press
+ * instead of being made a second time.
  */
 import { z } from "zod";
 import { GitHubError } from "../github/client";
@@ -14,10 +15,10 @@ import { exclusive, persistExclusive } from "../plan/service";
 import { announceImplementation } from "./notifications";
 import { unapprovedDecisions } from "./open-decisions";
 
-import type { GitHubAssignment, GitHubIssueRef } from "../github/client";
+import type { GitHubAssignment, GitHubIssueBody, GitHubIssueRef } from "../github/client";
 import type { Plan } from "../plan/service";
 import type { Record as DecisionRecord } from "../questions/records";
-import type { Task, Version } from "./graphs";
+import type { Graph, Task, Version } from "./graphs";
 import type { IssueExportSnapshot } from "@chopin/protocol/implementation";
 
 /** The assignee value that asks for Copilot's coding agent rather than a person. */
@@ -27,6 +28,18 @@ const COPILOT_LOGIN = "copilot-swe-agent[bot]";
 const MAX_BODY = 60_000;
 const MAX_FIELD = 12_000;
 export const MAX_EXPORTED_TASKS = 100;
+/** The longest task ID an export stores; `restoreIssues` refuses a longer one. */
+export const MAX_EXPORTED_TASK_ID = 128;
+
+/** The hidden line that ends a document's parent issue. */
+export function parentMarker(channelId: string): string {
+	return `<!-- chopin:${channelId} -->`;
+}
+
+/** The hidden line that ends a task's issue. */
+export function taskMarker(channelId: string, taskId: string): string {
+	return `<!-- chopin:${channelId}:${taskId} -->`;
+}
 
 let login = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/);
 let refSchema = z.object({
@@ -80,7 +93,7 @@ export const assigneesSchema = z.record(
  * implements a task says `Closes #n`, so GitHub links it to the task's issue and closes the issue
  * when it merges. Nothing when the tasks were never made into issues.
  */
-export function issueLinks(plan: Plan): {
+export function issueLinks(plan: { issues?: IssueExport; graph?: Graph }): {
 	issues?: {
 		instructions: string;
 		parent?: { number: number; url: string };
@@ -186,10 +199,12 @@ export function parentIssue(input: {
 				...open,
 			]
 			: []),
-		"",
-		`<!-- chopin:${input.channelId} -->`,
 	].join("\n");
-	return { title: clip(input.title, 250) || "Implementation tasks", body: clip(body, MAX_BODY) };
+	// The marker is added after clipping, so a long body never loses it.
+	return {
+		title: clip(input.title, 250) || "Implementation tasks",
+		body: `${clip(body, MAX_BODY)}\n\n${parentMarker(input.channelId)}`,
+	};
 }
 
 /** One task's issue: its context, goal, acceptance criteria and the issues it waits on. */
@@ -226,10 +241,11 @@ export function taskIssue(input: {
 		`Part of #${input.parent}, from [${input.title}](${input.url}) in Chopin.${
 			input.open ? ` Some decisions are still open; see #${input.parent}.` : ""
 		}`,
-		"",
-		`<!-- chopin:${input.channelId}:${task.id} -->`,
 	].join("\n");
-	return { title: clip(task.title, 250), body: clip(body, MAX_BODY) };
+	return {
+		title: clip(task.title, 250),
+		body: `${clip(body, MAX_BODY)}\n\n${taskMarker(input.channelId, task.id)}`,
+	};
 }
 
 /** Tasks with every dependency before them, in the graph's order otherwise. */
@@ -282,6 +298,8 @@ export type IssueWriter = {
 	addSubIssue(parent: number, child: number): Promise<void>;
 	addBlockedBy(issue: number, blocker: number): Promise<void>;
 	addAssignees(issue: number, assignment: GitHubAssignment): Promise<string[]>;
+	/** Issues the presser opened or that changed since `since`; optional where it can't be listed. */
+	issuesBy?(since: string): Promise<GitHubIssueBody[]>;
 };
 
 export type ExportContext = {
@@ -331,6 +349,64 @@ async function commit(
 	});
 }
 
+/**
+ * One GitHub write of the export. GitHub's refusal is recorded as the task's problem and answers
+ * false; a failure to record it, like any failure to save, ends the press.
+ */
+async function step(
+	write: () => Promise<unknown>,
+	record: (problem: string) => Promise<void>,
+	kind: Parameters<typeof problemFor>[1],
+	log?: (error: unknown) => void,
+): Promise<boolean> {
+	try {
+		await write();
+		return true;
+	} catch (error) {
+		log?.(error);
+		await record(problemFor(error, kind));
+		return false;
+	}
+}
+
+/**
+ * The parent and task issues an earlier press made but did not record, found by the marker at the
+ * end of their bodies among the presser's issues since that press. A listing that fails finds
+ * nothing, as before there was one.
+ */
+async function recover(
+	context: ExportContext,
+	tasks: Task[],
+	current: IssueExport,
+	since: string,
+): Promise<{ parent?: GitHubIssueRef; tasks: Map<string, GitHubIssueRef> }> {
+	let found = {
+		parent: undefined as GitHubIssueRef | undefined,
+		tasks: new Map<string, GitHubIssueRef>(),
+	};
+	if (!context.github.issuesBy) return found;
+	// A minute's slack for a clock GitHub and this server disagree on.
+	let from = new Date(Date.parse(since) - 60_000).toISOString();
+	let listed = await context.github.issuesBy(from).catch(() => []);
+	let ended = (body: string, marker: string) => body.trimEnd().endsWith(marker);
+	// Oldest first, so the first issue made for a task is the one kept.
+	for (let issue of [...listed].sort((a, b) => a.number - b.number)) {
+		let ref = { id: issue.id, number: issue.number, url: issue.url };
+		if (!current.parent && !found.parent && ended(issue.body, parentMarker(context.channelId))) {
+			found.parent = ref;
+			continue;
+		}
+		for (let task of tasks) {
+			if (current.tasks[task.id]?.issue || found.tasks.has(task.id)) continue;
+			if (ended(issue.body, taskMarker(context.channelId, task.id))) {
+				found.tasks.set(task.id, ref);
+				break;
+			}
+		}
+	}
+	return found;
+}
+
 function latest(plan: Plan): Version {
 	let graph = plan.graph?.versions.at(-1);
 	if (!graph || graph.definition.tasks.length === 0) {
@@ -376,6 +452,7 @@ async function run(
 	},
 ): Promise<IssueExport> {
 	let expected = { graphNumber: input.graphNumber, graphRevision: input.graphRevision };
+	let lastPress: string | undefined;
 	// The intent first: the version, who pressed, and the assignees picked for issues not yet made.
 	let { tasks, records } = await context.withPlan(plan =>
 		exclusive(plan, async () => {
@@ -386,11 +463,19 @@ async function run(
 			if (graph.definition.tasks.length > MAX_EXPORTED_TASKS) {
 				throw new GitHubError(`at most ${MAX_EXPORTED_TASKS} tasks can become issues`, 409);
 			}
+			// Stored IDs are bounded on restore, so a longer one is refused before anything is kept.
+			if (graph.definition.tasks.some(task => task.id.length > MAX_EXPORTED_TASK_ID)) {
+				throw new GitHubError(
+					`a task ID longer than ${MAX_EXPORTED_TASK_ID} characters can't become an issue`,
+					409,
+				);
+			}
 			let ids = new Set(graph.definition.tasks.map(task => task.id));
 			if (Object.keys(input.assignees).some(id => !ids.has(id))) {
 				throw new GitHubError("the tasks have changed; reload and try again", 409);
 			}
 			let previous = plan.issues;
+			lastPress = previous?.at;
 			let kept: Record<string, Entry> = {};
 			for (let task of graph.definition.tasks) {
 				let entry: Entry = { ...previous?.tasks[task.id] };
@@ -425,6 +510,22 @@ async function run(
 		context.withPlan(plan => commit(plan, expected, change));
 
 	let current = await state();
+	let missing = !current.parent || tasks.some(task => !current.tasks[task.id]?.issue);
+	// A press after an earlier one first finds, by marker, any issue that press made but could not
+	// record, so it is never made twice.
+	if (lastPress && missing) {
+		let found = await recover(context, tasks, current, lastPress);
+		if (found.parent || found.tasks.size > 0) {
+			await save(issues => {
+				if (found.parent && !issues.parent) issues.parent = found.parent;
+				for (let [id, issue] of found.tasks) {
+					let saved = issues.tasks[id] ?? {};
+					if (!saved.issue) issues.tasks[id] = { ...saved, issue };
+				}
+			});
+			current = await state();
+		}
+	}
 	let open = stillOpen(records).length > 0;
 	let parent = current.parent;
 	let madeParent = !parent;
@@ -444,6 +545,7 @@ async function run(
 			await save(issues => void (issues.problem = problem));
 			throw new GitHubError(problem, error instanceof GitHubError ? error.status : 502);
 		}
+		// A failure to save it ends the press; the next one finds the issue by its marker.
 		let created = parent;
 		await save(issues => {
 			issues.parent = created;
@@ -464,8 +566,9 @@ async function run(
 			let title = tasks.find(item => item.id === id)?.title;
 			return issue && title ? [{ number: issue.number, title }] : [];
 		});
+		let issue: GitHubIssueRef;
 		try {
-			let issue = await context.github.createIssue(taskIssue({
+			issue = await context.github.createIssue(taskIssue({
 				task,
 				parent: parent.number,
 				dependencies,
@@ -474,21 +577,23 @@ async function run(
 				channelId: context.channelId,
 				open,
 			}));
-			issueOf.set(task.id, issue);
-			made.push(issue.number);
-			await save(issues => {
-				let saved = issues.tasks[task.id] ?? {};
-				saved.issue = issue;
-				delete saved.problem;
-				issues.tasks[task.id] = saved;
-			});
 		} catch (error) {
-			if (error instanceof GitHubError && error.status === 409) throw error;
 			let problem = problemFor(error, "create");
 			await save(issues => {
 				issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
 			});
+			continue;
 		}
+		// Only GitHub's refusal is the task's problem. A failure to save the issue ends the press
+		// before anything is linked to it; the next press finds it by its marker.
+		await save(issues => {
+			let saved = issues.tasks[task.id] ?? {};
+			saved.issue = issue;
+			delete saved.problem;
+			issues.tasks[task.id] = saved;
+		});
+		issueOf.set(task.id, issue);
+		made.push(issue.number);
 	}
 
 	// Links, then blocked-by, then assignees: each recorded so a press again skips what is done.
@@ -498,16 +603,17 @@ async function run(
 		current = await state();
 		let entry = current.tasks[task.id] ?? {};
 		if (!entry.linked) {
-			try {
-				await context.github.addSubIssue(parent.number, issue.id);
+			let linked = await step(
+				() => context.github.addSubIssue(parent.number, issue.id),
+				problem =>
+					save(issues => {
+						issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
+					}),
+				"link",
+			);
+			if (linked) {
 				await save(issues => {
 					issues.tasks[task.id] = { ...issues.tasks[task.id], linked: true };
-				});
-			} catch (error) {
-				if (error instanceof GitHubError && error.status === 409) throw error;
-				let problem = problemFor(error, "link");
-				await save(issues => {
-					issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
 				});
 			}
 		}
@@ -515,20 +621,21 @@ async function run(
 		for (let id of task.dependsOn) {
 			let blocker = issueOf.get(id);
 			if (!blocker || blocked.has(id)) continue;
-			try {
-				await context.github.addBlockedBy(issue.number, blocker.id);
-				blocked.add(id);
-				let done = [...blocked];
-				await save(issues => {
-					issues.tasks[task.id] = { ...issues.tasks[task.id], blockedBy: done };
-				});
-			} catch (error) {
-				if (error instanceof GitHubError && error.status === 409) throw error;
-				let problem = problemFor(error, "block");
-				await save(issues => {
-					issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
-				});
-			}
+			let blockerId = blocker.id;
+			let linked = await step(
+				() => context.github.addBlockedBy(issue.number, blockerId),
+				problem =>
+					save(issues => {
+						issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
+					}),
+				"block",
+			);
+			if (!linked) continue;
+			blocked.add(id);
+			let done = [...blocked];
+			await save(issues => {
+				issues.tasks[task.id] = { ...issues.tasks[task.id], blockedBy: done };
+			});
 		}
 		let assignee = entry.assignee;
 		if (assignee && !entry.assigned && context.canAssign === false) {
@@ -538,46 +645,50 @@ async function run(
 			});
 		} else if (assignee && !entry.assigned) {
 			let copilot = assignee === COPILOT;
-			try {
-				let assigned = await context.github.addAssignees(issue.number, {
-					assignees: [copilot ? COPILOT_LOGIN : assignee],
-					...(copilot
-						? {
-							agent: {
-								repository: context.repository,
-								...(context.defaultBranch ? { baseBranch: context.defaultBranch } : {}),
-							},
-						}
-						: {}),
-				});
-				let took = assigned.some(login =>
-					copilot ? /copilot/i.test(login) : login.toLowerCase() === assignee.toLowerCase()
-				);
-				if (!took) {
-					// GitHub answered without the assignee: it ignores logins it may not assign.
-					throw new GitHubError(
-						`assignee was not added (GitHub answered ${assigned.length} assignees)`,
-						422,
+			let assigned = await step(
+				async () => {
+					let logins = await context.github.addAssignees(issue.number, {
+						assignees: [copilot ? COPILOT_LOGIN : assignee],
+						...(copilot
+							? {
+								agent: {
+									repository: context.repository,
+									...(context.defaultBranch ? { baseBranch: context.defaultBranch } : {}),
+								},
+							}
+							: {}),
+					});
+					let took = logins.some(login =>
+						copilot ? /copilot/i.test(login) : login.toLowerCase() === assignee.toLowerCase()
 					);
-				}
+					if (!took) {
+						// GitHub answered without the assignee: it ignores logins it may not assign.
+						throw new GitHubError(
+							`assignee was not added (GitHub answered ${logins.length} assignees)`,
+							422,
+						);
+					}
+				},
+				problem =>
+					save(issues => {
+						issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
+					}),
+				"assign",
+				error =>
+					// Token-safe: the step, GitHub's status and our reason, never a token or a body.
+					console.error(
+						"chopin: assigning an exported issue failed",
+						JSON.stringify({
+							issue: issue.number,
+							copilot,
+							status: error instanceof GitHubError ? error.status : undefined,
+							reason: error instanceof Error ? error.message : String(error),
+						}),
+					),
+			);
+			if (assigned) {
 				await save(issues => {
 					issues.tasks[task.id] = { ...issues.tasks[task.id], assigned: true };
-				});
-			} catch (error) {
-				if (error instanceof GitHubError && error.status === 409) throw error;
-				// Token-safe: the step, GitHub's status and our reason, never a token or a body.
-				console.error(
-					"chopin: assigning an exported issue failed",
-					JSON.stringify({
-						issue: issue.number,
-						copilot,
-						status: error instanceof GitHubError ? error.status : undefined,
-						reason: error instanceof Error ? error.message : String(error),
-					}),
-				);
-				let problem = problemFor(error, "assign");
-				await save(issues => {
-					issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
 				});
 			}
 		}

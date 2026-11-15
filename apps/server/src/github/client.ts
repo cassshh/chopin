@@ -23,6 +23,8 @@ export type GitHubIssueRef = {
 	url: string;
 };
 
+export type GitHubIssueBody = GitHubIssueRef & { body: string };
+
 /** Who an issue is assigned to; Copilot's coding agent takes the repository and branch it works on. */
 export type GitHubAssignment = {
 	assignees: string[];
@@ -193,6 +195,16 @@ export interface GitHub {
 		name: string,
 		input: { title: string; body: string },
 	): Promise<GitHubIssueRef>;
+	/**
+	 * Issues (not pull requests) `creator` opened or that changed since `since`, with their bodies,
+	 * newest first and bounded to three pages; used to find an issue whose creation answer was lost.
+	 */
+	issuesBy?(
+		token: string,
+		owner: string,
+		name: string,
+		query: { creator: string; since: string },
+	): Promise<GitHubIssueBody[]>;
 	/** Make the issue with database ID `child` a sub-issue of issue number `parent`. */
 	addSubIssue?(
 		token: string,
@@ -866,6 +878,48 @@ export class GitHubClient implements GitHub, GitHubReferenceSource {
 			throw new GitHubError("GitHub returned an invalid issue");
 		}
 		return { id: value.id, number: value.number, url: value.html_url };
+	}
+
+	async issuesBy(
+		token: string,
+		owner: string,
+		name: string,
+		query: { creator: string; since: string },
+	): Promise<GitHubIssueBody[]> {
+		let path = `${repoPath(owner, name)}/issues`;
+		let found: GitHubIssueBody[] = [];
+		let page: number | undefined = 1;
+		let visited = new Set<number>();
+		while (page && !visited.has(page) && visited.size < 3) {
+			visited.add(page);
+			let url = new URL(path, this.#endpoints.api);
+			url.searchParams.set("creator", query.creator);
+			url.searchParams.set("since", query.since);
+			url.searchParams.set("state", "all");
+			url.searchParams.set("per_page", "100");
+			url.searchParams.set("page", String(page));
+			let response = await this.#request(url, token);
+			let list = await body(response);
+			if (!Array.isArray(list)) throw new GitHubError("GitHub returned an invalid issue list");
+			for (let entry of list) {
+				let item = record(entry);
+				if (
+					!item
+					|| item.pull_request !== undefined
+					|| typeof item.id !== "number"
+					|| typeof item.number !== "number"
+					|| typeof item.html_url !== "string"
+				) continue;
+				found.push({
+					id: item.id,
+					number: item.number,
+					url: item.html_url,
+					body: typeof item.body === "string" ? item.body : "",
+				});
+			}
+			page = nextPage(response.headers.get("link"), this.#endpoints.api, path);
+		}
+		return found;
 	}
 
 	async addSubIssue(

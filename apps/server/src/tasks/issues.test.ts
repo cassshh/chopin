@@ -13,6 +13,7 @@ import {
 	READ_ONLY_ISSUES,
 	restoreIssues,
 	taskIssue,
+	taskMarker,
 } from "./issues";
 
 import type { GitHubAssignment } from "../github/client";
@@ -387,6 +388,101 @@ describe("exportIssues", () => {
 			expect(issuesSnapshot(context.plan, true)?.running).toBe(true);
 			release();
 			await slow;
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("an issue whose creation answer was lost is found by its marker, not made again", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			// GitHub makes the api issue, but its answer never arrives.
+			let made: Array<{ id: number; number: number; url: string; body: string }> = [];
+			let first = fakeGitHub();
+			let create = first.github.createIssue;
+			first.github.createIssue = async issue => {
+				let ref = await create(issue);
+				made.push({ ...ref, body: issue.body });
+				if (issue.title === "Expose the export endpoint") {
+					throw new GitHubError("GitHub API rejected the request", 502);
+				}
+				return ref;
+			};
+			let result = await exportIssues(exportContext(first.github), input());
+			expect(result.tasks.api?.issue).toBeUndefined();
+
+			let second = fakeGitHub();
+			let since: string[] = [];
+			let again = await exportIssues(
+				exportContext({
+					...second.github,
+					issuesBy: async from => {
+						since.push(from);
+						return made;
+					},
+				}),
+				input(),
+			);
+			// Nothing was made again: the lost issue is recorded, then linked and blocked as usual.
+			expect(second.calls.filter(call => call.kind === "create")).toEqual([]);
+			let lost = made.find(issue => issue.body.endsWith(taskMarker(context.plan.id, "api")))!;
+			expect(again.tasks.api).toMatchObject({ issue: { number: lost.number }, linked: true });
+			expect(second.calls).toContainEqual({ kind: "link", parent: 1, child: lost.id });
+			// It looked from a minute before the first press.
+			expect(Date.parse(since[0]!)).toBeLessThanOrEqual(Date.parse(result.at) - 60_000);
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("an issue that can't be saved ends the press before anything is linked to it", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			let commit = context.storage.collaboration.commit;
+			let { github, calls } = fakeGitHub();
+			let create = github.createIssue;
+			github.createIssue = async issue => {
+				let ref = await create(issue);
+				if (issue.title === "Model the export") {
+					context.storage.collaboration.commit = async () => {
+						throw new Error("offline");
+					};
+				}
+				return ref;
+			};
+			await expect(exportIssues(exportContext(github), input())).rejects.toThrow("offline");
+			context.storage.collaboration.commit = commit;
+			// The unsaved model issue was never linked, and no later task was made.
+			expect(calls.filter(call => call.kind !== "create")).toEqual([]);
+			expect(calls.filter(call => call.kind === "create")).toHaveLength(2);
+			expect(context.plan.issues?.tasks.model?.issue).toBeUndefined();
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("a task ID too long to store is refused before anything is kept", async () => {
+		let context = await openPlan("# Export\n");
+		try {
+			let saved = await implementationGraphs().revise(context.plan, {
+				planRevision: 0,
+				graphRevision: 0,
+				operations: [{ op: "add", task: { ...tasks[1]!, id: "x".repeat(129) } }],
+			});
+			if (!saved.ok) throw new Error(`graph refused: ${saved.reason}`);
+			let graph = context.plan.graph!.versions.at(-1)!;
+			let { github, calls } = fakeGitHub();
+			await expect(exportIssues({
+				channelId: context.plan.id,
+				title: "Export",
+				url: "https://chopin.test/doc",
+				repository: "owner/repository",
+				withPlan: action => action(context.plan),
+				github,
+			}, { graphNumber: graph.number, graphRevision: graph.revision, by: "test", assignees: {} }))
+				.rejects.toThrow("longer than 128");
+			expect(context.plan.issues).toBeUndefined();
+			expect(calls).toEqual([]);
 		} finally {
 			await Service.close(context.plan);
 		}
