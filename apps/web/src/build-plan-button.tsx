@@ -282,6 +282,9 @@ export function useBuildPlan(
 				!graph || fresh.planRevision !== shown.planRevision
 				|| graph.number !== shown.graphVersion || graph.revision !== shown.graphRevision
 			) {
+				// Back from a refused start too (Retry), so the changed tasks show for review again,
+				// or Build plan when an edit left them out of date.
+				dispatch({ type: "reset" });
 				setReviewChanged(true);
 				return;
 			}
