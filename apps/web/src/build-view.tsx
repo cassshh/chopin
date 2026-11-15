@@ -47,6 +47,7 @@ import {
 	createIssues,
 	implementationEndpoint,
 	implementationResponse as response,
+	issuesComplete,
 	stopBuild,
 } from "./build-start";
 import { useDocumentPeople } from "./chat/document-people";
@@ -486,11 +487,17 @@ export function BuildView(
 			if (!graph) return;
 			setCreating(true);
 			try {
-				await createIssues(room, {
+				let result = await createIssues(room, {
 					graphNumber: graph.number,
 					graphRevision: graph.revision,
 					assignees: {},
 				});
+				// Builds only once every task is tracked; otherwise the card shows what failed and
+				// offers Create missing issues.
+				if (!issuesComplete(result, graph.definition.tasks.map(task => task.id))) {
+					setActionError("Some issues weren’t made, so the build didn’t start");
+					return;
+				}
 			} catch (error) {
 				setActionError(
 					sentenceCase(error instanceof Error ? error.message : "Couldn’t create the issues"),

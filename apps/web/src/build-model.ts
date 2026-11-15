@@ -920,7 +920,13 @@ export function buildLook(snapshot: Snapshot | undefined, context: BuildContext)
 	}
 	// Tasks made into issues and not built: the slot names the issues, and Approve plan still builds them.
 	let issues = snapshot.issues;
-	if (phase.kind === "review" && issues?.parent && issues.current && !issues.running) {
+	// Only when every task has its issue: a partial export stays under review with its retry.
+	let everyTask = (snapshot.graph?.definition.tasks ?? []).every(task =>
+		issues?.tasks[task.id]?.number !== undefined
+	);
+	if (
+		phase.kind === "review" && issues?.parent && issues.current && !issues.running && everyTask
+	) {
 		let blocked = !context.connected ? "Chopin isn’t connected" : blockerReason(snapshot);
 		return {
 			kind: "issued",
