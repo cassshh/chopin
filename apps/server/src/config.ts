@@ -373,6 +373,8 @@ export function load(): Config {
 			? "typesafe/jev-latest"
 			: process.env.OPENAI_API_KEY
 			? "openai-decisions/gpt-6-luna"
+			: process.env.GEMINI_API_KEY
+			? "google-decisions/gemini-decision-1"
 			: undefined);
 	if (decisionsModel && !CLASSIFIER.test(decisionsModel)) {
 		throw new Error(
@@ -398,8 +400,8 @@ export function load(): Config {
 	if (needsDecisions && !decisionsModel) {
 		throw new Error(
 			`A decisions model is required when ${needsDecisions}. Set OPENAI_API_KEY for OpenAI's `
-				+ "Decisions API, JEV_API_KEY for TypeSafe's Jev, or DECISIONS_MODEL to another "
-				+ "classifier provider/id.",
+				+ "Decisions API, JEV_API_KEY for TypeSafe's Jev, GEMINI_API_KEY for Gemini Decisions, "
+				+ "or DECISIONS_MODEL to another classifier provider/id.",
 		);
 	}
 	let graceRaw = process.env.PLANNER_ATTACH_GRACE_MS;

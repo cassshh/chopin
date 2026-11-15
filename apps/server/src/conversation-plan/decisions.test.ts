@@ -187,6 +187,8 @@ describe("decide", () => {
 				),
 			},
 			{ state: "", questions: { "invalid id": flag } },
+			{ state: "", questions: { "intent:r0": flag } },
+			{ state: "", questions: { ["q".repeat(65)]: flag } },
 			{ state: "", questions: { flag: { ...flag, instructions: "" } } },
 			{
 				state: "",
