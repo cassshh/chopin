@@ -169,7 +169,7 @@ test("the machine button left of Build plan chooses where work runs, and an offl
 	// With no choice the icon shows the machine Automatic uses, an icon only, just left of Build.
 	await expect(button).toHaveAccessibleName(/^Runs on (build-box|laptop)$/);
 	await expect(button).toHaveText("");
-	let build = page.getByRole("button", { name: "Build plan", exact: true });
+	let build = page.getByRole("button", { name: "Approve plan", exact: true });
 	let at = (await button.boundingBox())!;
 	let next = (await build.boundingBox())!;
 	expect(at.x + at.width).toBeLessThanOrEqual(next.x);
@@ -228,7 +228,7 @@ test("the machine button left of Build plan chooses where work runs, and an offl
 	await expect(build).toHaveAccessibleDescription("build-box is offline");
 	await expect(build).not.toHaveAttribute("disabled");
 	await expect(build).not.toHaveAttribute("data-tooltip");
-	await expect(plan).toHaveText("Build plan");
+	await expect(plan).toHaveText("Approve plan");
 	await build.focus();
 	await expect(build).toBeFocused();
 	// Pressing it starts nothing and says nothing.
@@ -243,7 +243,7 @@ test("the machine button left of Build plan chooses where work runs, and an offl
 	await page.waitForTimeout(500);
 	page.off("request", record);
 	expect(posted).toEqual([]);
-	await expect(plan).toHaveText("Build plan");
+	await expect(plan).toHaveText("Approve plan");
 	await expect(page.getByRole("alert").filter({ hasText: /offline/i })).toHaveCount(0);
 	await crop(page, [button, plan], "desktop-build-offline");
 	// The list shows the chosen machine offline and not choosable.
@@ -341,7 +341,7 @@ test("a chosen machine going offline and coming back shows within seconds, witho
 	let box = await connected(page, "build-box");
 	let laptop = await connected(page, "laptop");
 	await page.reload();
-	let build = page.getByRole("button", { name: "Build plan", exact: true });
+	let build = page.getByRole("button", { name: "Approve plan", exact: true });
 	let plan = page.locator(".build-plan");
 	let entry = page.getByRole("complementary", { name: "Projects" })
 		.getByRole("button", { name: /^Machines/ });
@@ -1036,7 +1036,7 @@ test("the machine button shows only while the person has a paired machine, appea
 	let chat = composer(page).getByRole("button", { name: /^Runs on/ });
 	let header = machineButton(page);
 	let send = composer(page).getByRole("button", { name: "Send message" });
-	let build = page.getByRole("button", { name: "Build plan", exact: true });
+	let build = page.getByRole("button", { name: "Approve plan", exact: true });
 	// No machine paired: no selector in Chat or beside Build plan, and no prompt to add one there
 	// either.
 	await expect(build).toBeVisible();
