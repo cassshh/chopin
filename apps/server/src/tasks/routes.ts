@@ -480,13 +480,8 @@ export function registerImplementationRoutes(router: Router, auth: HostedAuth, o
 						as(token => addAssignees.call(github, token, owner, name, issue, assignment)),
 					...(issuesBy
 						? {
-							issuesBy: (since: string) =>
-								as(token =>
-									issuesBy.call(github, token, owner, name, {
-										creator: session.user.login,
-										since,
-									})
-								),
+							issuesBy: (creator: string, since: string) =>
+								as(token => issuesBy.call(github, token, owner, name, { creator, since })),
 						}
 						: {}),
 				},
