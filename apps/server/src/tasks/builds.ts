@@ -421,7 +421,8 @@ export async function queueRebuild(
 		let live = plan.live;
 		if (!live) return { kind: "unavailable" };
 		if (options.automatic && stoppedForRevision(plan)) return { kind: "unavailable" };
-		if (buildActive(plan)) return { kind: "busy" };
+		// Issues being made for these tasks: a rebuild would revise the tasks under the export.
+		if (buildActive(plan) || exporting(plan.id)) return { kind: "busy" };
 		if (source(plan) === live.baseSource) return { kind: "unchanged" };
 		{
 			let ready = await planningReadiness(plan, plan.revision);
