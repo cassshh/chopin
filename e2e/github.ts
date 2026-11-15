@@ -110,7 +110,7 @@ const installations = [
 			pull_requests: "write",
 			checks: "read",
 			statuses: "read",
-			issues: "read",
+			issues: "write",
 		},
 	},
 	{
@@ -239,6 +239,9 @@ async function copilotModels(authorization: string): Promise<Response> {
 	}
 	return json({ data: [{ id: "gpt-e2e" }] });
 }
+
+/** How many issues Create issues has made in this server's life. */
+let createdIssues = 0;
 
 function json(value: unknown, init: ResponseInit = {}): Response {
 	return Response.json(value, init);
@@ -413,6 +416,36 @@ let fake = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof f
 					{ path: "src/chat/composer.tsx", type: "blob" },
 				],
 			});
+		}
+		// Issues Create issues makes in octo-org/score: numbered from 900, ids from 9000.
+		if (init?.method === "POST" && url.pathname.startsWith("/repos/octo-org/score/issues")) {
+			let payload = JSON.parse(String(init.body ?? "{}")) as {
+				title?: string;
+				assignees?: string[];
+			};
+			if (url.pathname === "/repos/octo-org/score/issues") {
+				let number = 900 + createdIssues++;
+				return json({
+					id: 9000 + number,
+					number,
+					html_url: `https://github.com/octo-org/score/issues/${number}`,
+					title: payload.title,
+				}, { status: 201 });
+			}
+			if (/^\/repos\/octo-org\/score\/issues\/\d+\/assignees$/.test(url.pathname)) {
+				return json({
+					assignees: (payload.assignees ?? []).map(login => ({
+						login: login === "copilot-swe-agent[bot]" ? "Copilot" : login,
+					})),
+				}, { status: 201 });
+			}
+			if (
+				/^\/repos\/octo-org\/score\/issues\/\d+\/(sub_issues|dependencies\/blocked_by)$/.test(
+					url.pathname,
+				)
+			) {
+				return json({}, { status: 201 });
+			}
 		}
 		let reference = /^\/repos\/octo-org\/score\/((?:pulls|issues)\/\d+)$/.exec(url.pathname);
 		let summary = reference && references.get(reference[1]!);
