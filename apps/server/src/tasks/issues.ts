@@ -30,6 +30,16 @@ const MAX_FIELD = 12_000;
 export const MAX_EXPORTED_TASKS = 100;
 /** The longest task ID an export stores; `restoreIssues` refuses a longer one. */
 export const MAX_EXPORTED_TASK_ID = 128;
+/** The most earlier presses whose unrecorded issues an export still looks for. */
+const MAX_UNRESOLVED = 10;
+
+/**
+ * A task ID an export can keep as a key: bounded as `restoreIssues` requires, and not `__proto__`,
+ * which an object takes as its prototype and JSON then drops.
+ */
+export function storableTaskId(id: string): boolean {
+	return id.length > 0 && id.length <= MAX_EXPORTED_TASK_ID && id !== "__proto__";
+}
 
 /** The hidden line that ends a document's parent issue. */
 export function parentMarker(channelId: string): string {
@@ -66,6 +76,13 @@ let exportSchema = z.object({
 	/** The GitHub login of whoever pressed last. */
 	by: login,
 	at: z.string().datetime(),
+	/**
+	 * Earlier presses that left something unmade, each with its presser and start: the issues the
+	 * next press looks among for one made but never recorded. Cleared once every issue is recorded.
+	 */
+	unresolved: z.array(z.object({ by: login, at: z.string().datetime() }).strict())
+		.max(MAX_UNRESOLVED)
+		.optional(),
 	parent: refSchema.optional(),
 	problem: z.string().min(1).max(300).optional(),
 	tasks: z.record(z.string().min(1).max(128), entrySchema).refine(
@@ -298,8 +315,8 @@ export type IssueWriter = {
 	addSubIssue(parent: number, child: number): Promise<void>;
 	addBlockedBy(issue: number, blocker: number): Promise<void>;
 	addAssignees(issue: number, assignment: GitHubAssignment): Promise<string[]>;
-	/** Issues the presser opened or that changed since `since`; optional where it can't be listed. */
-	issuesBy?(since: string): Promise<GitHubIssueBody[]>;
+	/** Issues `creator` opened that changed since `since`; optional where they can't be listed. */
+	issuesBy?(creator: string, since: string): Promise<GitHubIssueBody[]>;
 };
 
 export type ExportContext = {
@@ -378,16 +395,22 @@ async function recover(
 	context: ExportContext,
 	tasks: Task[],
 	current: IssueExport,
-	since: string,
+	presses: Array<{ by: string; at: string }>,
 ): Promise<{ parent?: GitHubIssueRef; tasks: Map<string, GitHubIssueRef> }> {
 	let found = {
 		parent: undefined as GitHubIssueRef | undefined,
 		tasks: new Map<string, GitHubIssueRef>(),
 	};
-	if (!context.github.issuesBy) return found;
-	// A minute's slack for a clock GitHub and this server disagree on.
-	let from = new Date(Date.parse(since) - 60_000).toISOString();
-	let listed = await context.github.issuesBy(from).catch(() => []);
+	let issuesBy = context.github.issuesBy;
+	if (!issuesBy) return found;
+	// Each earlier presser's own issues since their press, with a minute's slack for a clock GitHub
+	// and this server disagree on. Only those, so an issue someone else wrote the marker into is
+	// never taken.
+	let listed = (await Promise.all(
+		presses.map(press =>
+			issuesBy(press.by, new Date(Date.parse(press.at) - 60_000).toISOString()).catch(() => [])
+		),
+	)).flat();
 	let ended = (body: string, marker: string) => body.trimEnd().endsWith(marker);
 	// Oldest first, so the first issue made for a task is the one kept.
 	for (let issue of [...listed].sort((a, b) => a.number - b.number)) {
@@ -452,7 +475,6 @@ async function run(
 	},
 ): Promise<IssueExport> {
 	let expected = { graphNumber: input.graphNumber, graphRevision: input.graphRevision };
-	let lastPress: string | undefined;
 	// The intent first: the version, who pressed, and the assignees picked for issues not yet made.
 	let { tasks, records } = await context.withPlan(plan =>
 		exclusive(plan, async () => {
@@ -463,10 +485,14 @@ async function run(
 			if (graph.definition.tasks.length > MAX_EXPORTED_TASKS) {
 				throw new GitHubError(`at most ${MAX_EXPORTED_TASKS} tasks can become issues`, 409);
 			}
-			// Stored IDs are bounded on restore, so a longer one is refused before anything is kept.
-			if (graph.definition.tasks.some(task => task.id.length > MAX_EXPORTED_TASK_ID)) {
+			// Stored IDs are bounded on restore and must be ordinary keys, so any other is refused
+			// before anything is kept.
+			let unstorable = graph.definition.tasks.find(task => !storableTaskId(task.id));
+			if (unstorable) {
 				throw new GitHubError(
-					`a task ID longer than ${MAX_EXPORTED_TASK_ID} characters can't become an issue`,
+					unstorable.id.length > MAX_EXPORTED_TASK_ID
+						? `a task ID longer than ${MAX_EXPORTED_TASK_ID} characters can't become an issue`
+						: `the task ID "${unstorable.id}" can't become an issue`,
 					409,
 				);
 			}
@@ -475,11 +501,17 @@ async function run(
 				throw new GitHubError("the tasks have changed; reload and try again", 409);
 			}
 			let previous = plan.issues;
-			lastPress = previous?.at;
 			let kept: Record<string, Entry> = {};
 			for (let task of graph.definition.tasks) {
 				let entry: Entry = { ...previous?.tasks[task.id] };
 				delete entry.problem;
+				// Only links to the task's current dependencies are kept, so a task revised across
+				// versions never gathers more than it has.
+				if (entry.blockedBy) {
+					let current = entry.blockedBy.filter(id => task.dependsOn.includes(id));
+					if (current.length > 0) entry.blockedBy = current;
+					else delete entry.blockedBy;
+				}
 				if (Object.hasOwn(input.assignees, task.id) && !entry.assigned) {
 					let assignee = input.assignees[task.id];
 					if (assignee) entry.assignee = assignee;
@@ -487,10 +519,25 @@ async function run(
 				}
 				kept[task.id] = entry;
 			}
+			// The press before this one, if it left anything unmade, joins those whose issues are
+			// looked for: its presser and start, the earliest kept for each presser.
+			let unresolved = [...previous?.unresolved ?? []];
+			let unfinished = previous
+				&& (!previous.parent
+					|| graph.definition.tasks.some(task => !previous.tasks[task.id]?.issue));
+			if (previous && unfinished) {
+				let same = unresolved.findIndex(press => press.by === previous.by);
+				if (same === -1) unresolved.push({ by: previous.by, at: previous.at });
+				else if (previous.at < unresolved[same]!.at) {
+					unresolved[same] = { by: previous.by, at: previous.at };
+				}
+			}
+			unresolved = unresolved.slice(-MAX_UNRESOLVED);
 			plan.issues = {
 				...expected,
 				by: input.by,
 				at: new Date().toISOString(),
+				...(unresolved.length > 0 ? { unresolved } : {}),
 				...(previous?.parent ? { parent: previous.parent } : {}),
 				tasks: kept,
 			};
@@ -511,10 +558,10 @@ async function run(
 
 	let current = await state();
 	let missing = !current.parent || tasks.some(task => !current.tasks[task.id]?.issue);
-	// A press after an earlier one first finds, by marker, any issue that press made but could not
-	// record, so it is never made twice.
-	if (lastPress && missing) {
-		let found = await recover(context, tasks, current, lastPress);
+	// A press after one that left something unmade first finds, by marker, any issue an earlier
+	// press made but could not record, among its own presser's issues, so it is never made twice.
+	if (current.unresolved && missing) {
+		let found = await recover(context, tasks, current, current.unresolved);
 		if (found.parent || found.tasks.size > 0) {
 			await save(issues => {
 				if (found.parent && !issues.parent) issues.parent = found.parent;
@@ -692,6 +739,14 @@ async function run(
 				});
 			}
 		}
+	}
+	// Every issue recorded: no earlier press's issues need looking for any more.
+	let finished = await state();
+	if (
+		finished.unresolved && finished.parent
+		&& tasks.every(task => finished.tasks[task.id]?.issue)
+	) {
+		await save(issues => void delete issues.unresolved);
 	}
 	if (madeParent || made.length > 0) {
 		let link = `[#${parent.number}](${parent.url})`;

@@ -416,7 +416,7 @@ describe("exportIssues", () => {
 			let again = await exportIssues(
 				exportContext({
 					...second.github,
-					issuesBy: async from => {
+					issuesBy: async (_creator, from) => {
 						since.push(from);
 						return made;
 					},
@@ -456,6 +456,104 @@ describe("exportIssues", () => {
 			expect(calls.filter(call => call.kind !== "create")).toEqual([]);
 			expect(calls.filter(call => call.kind === "create")).toHaveLength(2);
 			expect(context.plan.issues?.tasks.model?.issue).toBeUndefined();
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("an issue another person's press made but never recorded is found among their issues", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			let made: Array<{ id: number; number: number; url: string; body: string }> = [];
+			let first = fakeGitHub();
+			let create = first.github.createIssue;
+			first.github.createIssue = async issue => {
+				let ref = await create(issue);
+				made.push({ ...ref, body: issue.body });
+				if (issue.title === "Expose the export endpoint") {
+					throw new GitHubError("GitHub API rejected the request", 502);
+				}
+				return ref;
+			};
+			// ana pressed first; bea presses again, then cy, and only ana's issues hold the lost one.
+			let firstPress = await exportIssues(exportContext(first.github), { ...input(), by: "ana" });
+			let asked: Array<[string, string]> = [];
+			let lister = (github: ExportContext["github"]) => ({
+				...github,
+				issuesBy: async (creator: string, since: string) => {
+					asked.push([creator, since]);
+					return creator === "ana" ? made : [];
+				},
+			});
+			// bea's press can neither list issues nor make the api issue, so it stays unmade for cy.
+			let failing = fakeGitHub(call =>
+				call.kind === "create" && call.title === "Expose the export endpoint"
+					? new GitHubError("GitHub API rejected the request", 502)
+					: undefined
+			);
+			await exportIssues(exportContext(failing.github), { ...input(), by: "bea" });
+			expect(context.plan.issues?.unresolved).toEqual([{ by: "ana", at: firstPress.at }]);
+
+			let third = fakeGitHub();
+			let again = await exportIssues(exportContext(lister(third.github)), { ...input(), by: "cy" });
+			expect(asked.map(([creator]) => creator).sort()).toEqual(["ana", "bea"]);
+			expect(third.calls.filter(call => call.kind === "create")).toEqual([]);
+			expect(again.tasks.api?.issue?.number).toBe(
+				made.find(issue => issue.body.endsWith(taskMarker(context.plan.id, "api")))!.number,
+			);
+			// Everything is recorded now, so nobody's issues need looking for again.
+			expect(again.unresolved).toBeUndefined();
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("a revised task keeps only the blocked-by links of its current dependencies", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			await exportIssues(exportContext(fakeGitHub().github), input());
+			expect(context.plan.issues?.tasks.ui?.blockedBy?.sort()).toEqual(["api", "model"]);
+			let graph = context.plan.graph!.versions.at(-1)!;
+			let revised = await implementationGraphs().revise(context.plan, {
+				planRevision: 0,
+				graphRevision: graph.revision,
+				operations: [{ op: "replace", id: "ui", task: { ...tasks[2]!, dependsOn: ["model"] } }],
+			});
+			if (!revised.ok) throw new Error(`graph refused: ${revised.reason}`);
+			let next = context.plan.graph!.versions.at(-1)!;
+			await exportIssues(exportContext(fakeGitHub().github), {
+				...input(),
+				graphNumber: next.number,
+				graphRevision: next.revision,
+			});
+			expect(context.plan.issues?.tasks.ui?.blockedBy).toEqual(["model"]);
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("a task ID that can't be an ordinary key is refused before anything is kept", async () => {
+		let context = await openPlan("# Export\n");
+		try {
+			let saved = await implementationGraphs().revise(context.plan, {
+				planRevision: 0,
+				graphRevision: 0,
+				operations: [{ op: "add", task: { ...tasks[1]!, id: "__proto__" } }],
+			});
+			if (!saved.ok) throw new Error(`graph refused: ${saved.reason}`);
+			let graph = context.plan.graph!.versions.at(-1)!;
+			let { github, calls } = fakeGitHub();
+			await expect(exportIssues({
+				channelId: context.plan.id,
+				title: "Export",
+				url: "https://chopin.test/doc",
+				repository: "owner/repository",
+				withPlan: action => action(context.plan),
+				github,
+			}, { graphNumber: graph.number, graphRevision: graph.revision, by: "test", assignees: {} }))
+				.rejects.toThrow("can't become an issue");
+			expect(context.plan.issues).toBeUndefined();
+			expect(calls).toEqual([]);
 		} finally {
 			await Service.close(context.plan);
 		}
