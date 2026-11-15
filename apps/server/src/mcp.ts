@@ -29,6 +29,7 @@ import type { UpdateDocument } from "./mcp/update";
 import type { UploadImageInput } from "./mcp/image";
 import type { Run, Version } from "./tasks/graphs";
 import type { unapprovedContext } from "./tasks/open-decisions";
+import type { issueLinks } from "./tasks/issues";
 import type { LifecycleArguments } from "./mcp/lifecycle";
 import type { ImplementationLifecycle } from "./tasks/lifecycle";
 import type { Issue } from "@chopin/dialect";
@@ -72,6 +73,8 @@ export type Implementation = {
 	unapprovedDecisions?: NonNullable<ReturnType<typeof unapprovedContext>>["unapprovedDecisions"];
 	/** Where the graph's plan revision's files were pushed, which a build of it starts from. */
 	planSource?: { revision: number; branch: string; commit: string };
+	/** The tasks' GitHub issues, for `Closes #<number>` lines; absent when none was made. */
+	issues?: ReturnType<typeof issueLinks>["issues"];
 };
 
 export type ImplementationInput = {

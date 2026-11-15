@@ -1581,6 +1581,7 @@ export async function readStored(
 	lifecycle?: Lifecycle;
 	records?: Questions.Record[];
 	planSources?: PlanSource[];
+	issues?: IssueExport;
 }> {
 	let restored = await restoreHosted(loaded.channel.id, loaded);
 	try {
@@ -1595,6 +1596,7 @@ export async function readStored(
 			...(restored.sidecar.execution ? { execution: restored.sidecar.execution } : {}),
 			...(restored.sidecar.lifecycle ? { lifecycle: restored.sidecar.lifecycle } : {}),
 			...(restored.sidecar.planSources ? { planSources: restored.sidecar.planSources } : {}),
+			...(restored.sidecar.issues ? { issues: restored.sidecar.issues } : {}),
 		};
 	} finally {
 		restored.document.doc.destroy();
