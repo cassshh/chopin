@@ -250,6 +250,11 @@ export function BuildView(
 		let entry = issues?.tasks[task.id];
 		return !entry?.number || !!entry.problem || !!entry.assignee && !entry.assigned;
 	});
+	// Every task has its issue, but the export is for older tasks (one removed, a dependency
+	// added) or stopped short (a close GitHub refused): a press brings GitHub up to date, with no
+	// assignees to pick.
+	let outdated = !!issues?.parent && unfinished.length === 0
+		&& (!issues.current || !!issues.problem);
 	let createAll = async () => {
 		let graph = snapshot?.graph;
 		if (!graph || creating) return;
@@ -298,6 +303,16 @@ export function BuildView(
 				type="button"
 			>
 				{issues?.parent ? "Create missing issues" : "Create issues"}
+			</button>
+		)
+		: exportable && outdated
+		? (
+			<button
+				className="btn btn-sm btn-outline shrink-0"
+				onClick={() => void createAll()}
+				type="button"
+			>
+				Update issues
 			</button>
 		)
 		: undefined;
