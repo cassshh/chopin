@@ -284,6 +284,38 @@ Direct `read_implementation` remains available for an archived document.
 run that started before archival remain accepted under the normal run and graph
 checks.
 
+## Export as GitHub issues
+
+A drafted or built graph can also end in work items instead of a local build. Once tasks exist and
+no build is running, a writer sees **Create issues** on the Build tab's status card. It lists the
+tasks with an assignee for each: nobody, Copilot (Copilot coding agent, which must be enabled on the
+repository), or a repository collaborator. Pressing **Create N issues** sends
+`POST /api/channels/:id/implementation/issues`, which:
+
+1. checks the origin, the presser's write access and the document (not archived, not a child), and
+   that the shown graph version and revision are still the latest;
+2. stores the intent (graph version, the presser, the assignees) in the sidecar's `issues` record
+   before anything reaches GitHub;
+3. with the presser's GitHub App user token, creates one parent issue for the document, then one
+   issue per task in dependency order, makes each a sub-issue of the parent, adds a "blocked by"
+   link for each dependency, and assigns it; each result is committed before the next step.
+
+The parent carries the document link, the answered decisions with their why, and the decisions
+still open. A task's issue carries its context, goal, acceptance criteria as a checklist and the
+issues it depends on. Every body ends with a hidden `<!-- chopin:<document>:<task> -->` marker.
+
+A step that fails is recorded on its task in plain words and the others go ahead; pressing
+**Create missing issues** again does only what is missing, so an issue Chopin recorded is never
+created twice. An answer GitHub lost after creating an issue can still leave a duplicate, which
+the marker finds. Issues already made for a task keep their link when the graph is revised and the
+task keeps its ID; edits to the task do not reach its issue. One export per document runs at a
+time.
+
+This needs the App's Issues permission at **Read and write**. GitHub also lists Actions read and
+write for assigning Copilot; without it only that assignment fails, and its task says so. The
+Planner never writes issues. The record lives in `apps/server/src/tasks/issues.ts` and is restored
+strictly: an invalid stored export rejects the document rather than being dropped.
+
 ## Lock behavior
 
 A queued or launching build freezes plan and decision edits before the MCP
