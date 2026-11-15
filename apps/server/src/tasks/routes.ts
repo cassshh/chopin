@@ -587,7 +587,7 @@ export function registerImplementationRoutes(router: Router, auth: HostedAuth, o
 				}).strict(),
 			);
 			let github = auth.github;
-			let { createIssue, addSubIssue, addBlockedBy, addAssignees, issuesBy } = github;
+			let { createIssue, addSubIssue, addBlockedBy, addAssignees, issuesBy, closeIssue } = github;
 			if (!createIssue || !addSubIssue || !addBlockedBy || !addAssignees) {
 				throw new GitHubError("this server cannot create issues", 501);
 			}
@@ -631,6 +631,12 @@ export function registerImplementationRoutes(router: Router, auth: HostedAuth, o
 						as(token => addBlockedBy.call(github, token, owner, name, issue, blocker)),
 					addAssignees: (issue, assignment) =>
 						as(token => addAssignees.call(github, token, owner, name, issue, assignment)),
+					...(closeIssue
+						? {
+							closeIssue: (issue: number) =>
+								as(token => closeIssue.call(github, token, owner, name, issue)),
+						}
+						: {}),
 					...(issuesBy
 						? {
 							issuesBy: (creator: string, since: string) =>

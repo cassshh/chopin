@@ -576,6 +576,99 @@ describe("exportIssues", () => {
 		}
 	});
 
+	test("the issue of a task removed from the graph is closed as not planned, and kept until it is", async () => {
+		let { context, exportContext, input } = await drafted();
+		let notices: Array<{ id: string; text: string }> = [];
+		context.plan.persistence.onBuildNotice = (_id, notice) => notices.push(notice);
+		try {
+			let first = await exportIssues(exportContext(fakeGitHub().github), input());
+			let ui = first.tasks.ui!.issue!;
+			let graph = context.plan.graph!.versions.at(-1)!;
+			let revised = await implementationGraphs().revise(context.plan, {
+				planRevision: 0,
+				graphRevision: graph.revision,
+				operations: [{ op: "remove", id: "ui" }],
+			});
+			if (!revised.ok) throw new Error(`graph refused: ${revised.reason}`);
+			let next = () => {
+				let version = context.plan.graph!.versions.at(-1)!;
+				return { ...input(), graphNumber: version.number, graphRevision: version.revision };
+			};
+
+			// GitHub refuses the close: the issue waits, with the reason on the export.
+			let closes: number[] = [];
+			let refusing = fakeGitHub();
+			let failed = await exportIssues(
+				exportContext({
+					...refusing.github,
+					closeIssue: async () => {
+						throw new GitHubError("GitHub API rejected the request", 502);
+					},
+				}),
+				next(),
+			);
+			expect(failed.tasks.ui).toBeUndefined();
+			expect(failed.removed).toEqual([{ task: "ui", issue: ui }]);
+			expect(failed.problem).toBe("GitHub couldn't be reached. Try again.");
+
+			// The next press closes it, says so in Chat, and forgets it.
+			let closing = fakeGitHub();
+			let done = await exportIssues(
+				exportContext({ ...closing.github, closeIssue: async issue => void closes.push(issue) }),
+				next(),
+			);
+			expect(closes).toEqual([ui.number]);
+			expect(done.removed).toBeUndefined();
+			expect(closing.calls.filter(call => call.kind === "create")).toEqual([]);
+			expect(notices.at(-1)?.text).toBe(
+				"@test closed 1 issue of tasks removed from the document under [#1](https://github.com/owner/repository/issues/1).",
+			);
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("a removed task that comes back before its issue is closed takes the issue back", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			let first = await exportIssues(exportContext(fakeGitHub().github), input());
+			let ui = first.tasks.ui!.issue!;
+			let graph = context.plan.graph!.versions.at(-1)!;
+			let removed = await implementationGraphs().revise(context.plan, {
+				planRevision: 0,
+				graphRevision: graph.revision,
+				operations: [{ op: "remove", id: "ui" }],
+			});
+			if (!removed.ok) throw new Error(`graph refused: ${removed.reason}`);
+			let version = context.plan.graph!.versions.at(-1)!;
+			// No close is possible here, so the issue waits in `removed`.
+			await exportIssues(exportContext(fakeGitHub().github), {
+				...input(),
+				graphNumber: version.number,
+				graphRevision: version.revision,
+			});
+			expect(context.plan.issues?.removed).toEqual([{ task: "ui", issue: ui }]);
+			let back = await implementationGraphs().revise(context.plan, {
+				planRevision: 0,
+				graphRevision: version.revision,
+				operations: [{ op: "add", task: tasks[2]! }],
+			});
+			if (!back.ok) throw new Error(`graph refused: ${back.reason}`);
+			let latest = context.plan.graph!.versions.at(-1)!;
+			let again = fakeGitHub();
+			let result = await exportIssues(exportContext(again.github), {
+				...input(),
+				graphNumber: latest.number,
+				graphRevision: latest.revision,
+			});
+			expect(result.tasks.ui?.issue).toEqual(ui);
+			expect(result.removed).toBeUndefined();
+			expect(again.calls.filter(call => call.kind === "create")).toEqual([]);
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
 	test("a task ID that can't be an ordinary key is refused before anything is kept", async () => {
 		let context = await openPlan("# Export\n");
 		try {
