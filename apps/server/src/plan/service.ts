@@ -8,6 +8,8 @@ import {
 	withDocumentTitle,
 } from "@chopin/dialect";
 import { locksEditing, releaseEndedRun, restoreBuilds, restoreLive } from "../tasks/builds";
+import { restoreIssues } from "../tasks/issues";
+import type { IssueExport } from "../tasks/issues";
 import { restorePlanSources } from "../tasks/plan-source";
 import {
 	announceImplementation,
@@ -319,6 +321,8 @@ export type Plan = {
 	lifecycle: Lifecycle;
 	/** The finished build this living document was last delivered from. */
 	live?: LiveBuild;
+	/** The GitHub issues the tasks were exported as. */
+	issues?: IssueExport;
 	/** Where recent revisions' files were pushed, oldest first; a build starts from one. */
 	planSources: PlanSource[];
 	/**
@@ -369,6 +373,7 @@ type Sidecar = {
 	execution?: Run;
 	lifecycle?: Lifecycle;
 	live?: LiveBuild;
+	issues?: IssueExport;
 	planSources?: PlanSource[];
 	mcpUpdates?: McpUpdateRecord[];
 	questions: Questions.Record[];
@@ -405,6 +410,7 @@ function state(plan: Plan, chat: ChatView = plan.chat): Sidecar {
 			? { lifecycle: plan.lifecycle }
 			: {}),
 		...(plan.live ? { live: plan.live } : {}),
+		...(plan.issues ? { issues: plan.issues } : {}),
 		...(plan.planSources.length ? { planSources: plan.planSources } : {}),
 		...(plan.mcpUpdates.length > 0 ? { mcpUpdates: plan.mcpUpdates } : {}),
 		questions: [...plan.records.values()],
@@ -620,6 +626,7 @@ function restoredState(
 	if (Object.hasOwn(item, "execution")) expected.push("execution");
 	if (Object.hasOwn(item, "lifecycle")) expected.push("lifecycle");
 	if (Object.hasOwn(item, "live")) expected.push("live");
+	if (Object.hasOwn(item, "issues")) expected.push("issues");
 	if (Object.hasOwn(item, "planSources")) expected.push("planSources");
 	if (Object.hasOwn(item, "mcpUpdates")) expected.push("mcpUpdates");
 	if (Object.hasOwn(item, "conversationPlan")) expected.push("conversationPlan");
@@ -682,6 +689,7 @@ function restoredState(
 	let live = Object.hasOwn(item, "live")
 		? restoreLive(item.live, builds, lifecycle, graph, item.revision)
 		: undefined;
+	let issues = Object.hasOwn(item, "issues") ? restoreIssues(item.issues) : undefined;
 	let planSources = restorePlanSources(item.planSources, item.revision);
 	let questions = objects(item.questions, "question record");
 	let records = questions.map(question => Questions.normalizeRecord(question));
@@ -835,6 +843,7 @@ function restoredState(
 		...(execution ? { execution } : {}),
 		...(lifecycle ? { lifecycle } : {}),
 		...(live ? { live } : {}),
+		...(issues ? { issues } : {}),
 		...(planSources.length ? { planSources } : {}),
 		...(mcpUpdates.length > 0 ? { mcpUpdates } : {}),
 		questions: records,
@@ -1645,6 +1654,7 @@ export async function open(
 		execution: sidecar.execution,
 		lifecycle: sidecar.lifecycle ?? { history: [] },
 		...(sidecar.live ? { live: sidecar.live } : {}),
+		...(sidecar.issues ? { issues: sidecar.issues } : {}),
 		planSources: sidecar.planSources ?? [],
 		claiming: false,
 		queue: [],
