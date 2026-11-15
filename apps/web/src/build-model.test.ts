@@ -1116,14 +1116,14 @@ describe("build status", () => {
 			.toMatchObject({ tip: "Edits since someone else’s build" });
 	});
 
-	it("asks for review of drafted tasks with Approve plan, which needs no Planner", () => {
+	it("asks for review of drafted tasks with Review plan, whose approval needs no Planner", () => {
 		let review = look(snapshot());
 		expect(review).toEqual({
 			kind: "review",
 			tasks: 1,
-			tip: "Review the 1 task in Build, then approve the plan to start building",
+			tip: "Review the 1 task in Build, then approve the plan or create issues",
 		});
-		expect(buildLabel(review)).toBe("Approve plan");
+		expect(buildLabel(review)).toBe("Review plan");
 		expect(buildTabReady(snapshot(), review)).toBe(true);
 		// Starting drafted tasks needs no Planner, only the connection.
 		expect(look(snapshot(), { planner: false }).kind).toBe("review");
