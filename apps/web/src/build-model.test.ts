@@ -1,4 +1,5 @@
 import { AI_ACCOUNT_UNCHECKED_RUN, NO_AI_ACCOUNT_RUN } from "@chopin/protocol/ai-credentials";
+import { issuesComplete } from "./build-start";
 import { describe, expect, it } from "bun:test";
 
 import {
@@ -1199,6 +1200,24 @@ describe("build status", () => {
 		expect(look(snapshot({ issues: { ...issues, current: false } })).kind).toBe("review");
 		expect(look(snapshot({ issues: { ...issues, running: true } })).kind).toBe("review");
 		expect(look(snapshot({ issues, planRevision: 5 })).kind).not.toBe("issued");
+		// A task whose issue wasn't made keeps the tasks under review, with Create missing issues.
+		let partial = {
+			...issues,
+			tasks: { a: { problem: "GitHub couldn't be reached. Try again." } },
+		};
+		expect(look(snapshot({ issues: partial })).kind).toBe("review");
+	});
+
+	it("counts an export complete only with the parent and every task's issue, and no problem", () => {
+		let parent = { number: 18, url: "https://github.com/o/r/issues/18" };
+		let issue = { number: 19, url: "https://github.com/o/r/issues/19" };
+		expect(issuesComplete({ parent, tasks: { a: issue } }, ["a"])).toBe(true);
+		expect(issuesComplete({ tasks: { a: issue } }, ["a"])).toBe(false);
+		expect(issuesComplete({ parent, tasks: { a: issue } }, ["a", "b"])).toBe(false);
+		expect(
+			issuesComplete({ parent, tasks: { a: { ...issue, problem: "Couldn't link it" } } }, ["a"]),
+		)
+			.toBe(false);
 	});
 });
 
