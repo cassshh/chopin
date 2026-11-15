@@ -46,7 +46,8 @@ function validateRequest(request: JevRequest): void {
 	}
 	for (let [id, question] of Object.entries(request.questions)) {
 		if (
-			!id || id.length > 100 || !/^[\w:-]+$/.test(id)
+			// The strictest classifier's rule (Gemini Decisions): letters, digits, _ and -, at most 64.
+			!/^[A-Za-z0-9_-]{1,64}$/.test(id)
 			|| !question.instructions || question.instructions.length > 1000
 		) invalid("invalid decision request");
 		if (question.type === "choice") {
@@ -213,7 +214,8 @@ async function check(
 	if (!model) {
 		throw new Error(
 			`${setting} ${selection} is not a classifier model in Atomic's registry. `
-				+ "Use an exact provider/id such as openai-decisions/gpt-6-luna or typesafe/jev-latest.",
+				+ "Use an exact provider/id such as openai-decisions/gpt-6-luna, typesafe/jev-latest or "
+				+ "google-decisions/gemini-decision-1.",
 		);
 	}
 	let available = await registry.getAvailableOfType("classifier", model.provider);
@@ -222,7 +224,7 @@ async function check(
 		throw new Error(
 			`${setting} ${selection} has no credentials. Set the ${key} for ${model.provider} `
 				+ "in the server environment (for example OPENAI_API_KEY for openai-decisions, "
-				+ "JEV_API_KEY for typesafe).",
+				+ "JEV_API_KEY for typesafe, GEMINI_API_KEY for google-decisions).",
 		);
 	}
 }
@@ -253,7 +255,8 @@ export async function openDecisions(
 
 /**
  * Atomic's model registry for decisions. Provider keys come from the environment as in
- * Atomic (OPENAI_API_KEY, TYPESAFE_API_KEY, ...), plus Chopin's JEV_API_KEY for TypeSafe.
+ * Atomic (OPENAI_API_KEY, TYPESAFE_API_KEY, GEMINI_API_KEY, ...), plus Chopin's JEV_API_KEY for
+ * TypeSafe.
  * Provider settings come from Atomic's models.json in its agent directory
  * (`ATOMIC_CODING_AGENT_DIR`). Nothing is read from or written to Atomic's saved logins.
  */

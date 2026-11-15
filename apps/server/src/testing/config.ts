@@ -31,6 +31,7 @@ export function configured(overrides: Record<string, string | undefined> = {}) {
 		DECISIONS_MODEL: undefined,
 		DECISIONS_TIMEOUT_MS: undefined,
 		OPENAI_API_KEY: undefined,
+		GEMINI_API_KEY: undefined,
 		PLANNER_ATTACH_GRACE_MS: undefined,
 		AGENT_CONNECTION_PING_MS: undefined,
 		AGENT_CONNECTION_TIMEOUT_MS: undefined,

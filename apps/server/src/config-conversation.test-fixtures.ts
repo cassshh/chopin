@@ -32,6 +32,7 @@ export function configured(overrides: Record<string, string | undefined> = {}) {
 		DECISIONS_MODEL: undefined,
 		DECISIONS_TIMEOUT_MS: undefined,
 		OPENAI_API_KEY: undefined,
+		GEMINI_API_KEY: undefined,
 		JEV_API_KEY: "synthetic-test-key",
 		TYPESAFE_API_KEY: undefined,
 		GITHUB_ALLOWED_USERS: undefined,
