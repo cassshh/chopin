@@ -148,34 +148,170 @@ export class WebSearchTimeoutError extends Error {
 	}
 }
 
+/** The hooks and limits every web_search provider's calls share. */
+export type WebSearchDeps = {
+	onCall?: (
+		result?: unknown,
+		error?: unknown,
+		diagnostic?: WebSearchFailureDiagnostic,
+	) => void | Promise<void>;
+	/** A call refused before dispatch, because the call cap or the remaining time is spent. */
+	onRefused?: (reason: "calls" | "time") => void;
+	timeoutMs?: number;
+	/** Budgets calls against the attempt deadline; unset, calls are unbudgeted. */
+	budget?: WebSearchBudget;
+	now?: () => number;
+	log?: (line: string) => void;
+};
+
+type SearchOptions = Parameters<NonNullable<ToolSet[string]["execute"]>>[1];
+
+/** The provider's own token-safe failure kind, with any numeric codes: `mcp-client:http:502`. */
+type Classify = (error: unknown) => string;
+
+/**
+ * The web_search tool the research worker calls, whichever provider answers: bound to the owner's
+ * credential, budgeted against the attempt deadline, timed out per call, and reporting each call
+ * and its token-safe failure to `deps.onCall`.
+ */
+export function budgetedWebSearch(options: {
+	credential: Credential;
+	deps: WebSearchDeps;
+	timeoutMs: number;
+	/** Names the provider in errors: `MCP web_search`, `Gemini web_search`. */
+	label: string;
+	description: string;
+	toModelOutput?: ToolSet[string]["toModelOutput"];
+	search: (input: { query: string }, options: SearchOptions) => Promise<unknown>;
+	classify: Classify;
+}): ToolSet["web_search"] {
+	let { credential, deps, timeoutMs } = options;
+	let now = deps.now ?? Date.now;
+	let log = deps.log ?? ((line: string) => console.warn(line));
+	let started = 0;
+	return tool({
+		description: options.description,
+		inputSchema: WEB_SEARCH_SCHEMA.web_search.inputSchema,
+		contextSchema: WebContext,
+		toModelOutput: options.toModelOutput,
+		execute: async (input, toolOptions) => {
+			let current = (toolOptions.context as z.infer<typeof WebContext>).credential;
+			if (
+				current !== credential || credential.signal?.aborted
+				|| credential.expiresAt.getTime() <= Date.now()
+			) throw new Error(`${options.label} authorization ended`);
+			let callTimeoutMs = timeoutMs;
+			if (deps.budget) {
+				let { maxCalls = WEB_SEARCH_MAX_CALLS, marginMs = WEB_SEARCH_MARGIN_MS } = deps.budget;
+				let { minWindowMs = WEB_SEARCH_MIN_WINDOW_MS } = deps.budget;
+				let remaining = deps.budget.deadline.getTime() - now();
+				if (started >= maxCalls) {
+					deps.onRefused?.("calls");
+					return refusal(
+						`web_search call limit reached (${maxCalls} per attempt). `
+							+ "Do not search again; submit your result now from the sources already returned.",
+					);
+				}
+				if (remaining < minWindowMs) {
+					deps.onRefused?.("time");
+					return refusal(
+						"Not enough time remains for another web_search call. "
+							+ "Do not search again; submit your result now from the sources already returned.",
+					);
+				}
+				callTimeoutMs = Math.min(timeoutMs, remaining - marginMs);
+			}
+			started++;
+			let began = performance.now();
+			let timeout = AbortSignal.timeout(callTimeoutMs);
+			let signal = AbortSignal.any([
+				timeout,
+				...(toolOptions.abortSignal ? [toolOptions.abortSignal] : []),
+				...(credential.signal ? [credential.signal] : []),
+			]);
+			let stop!: () => void;
+			let phase: "authorization" | "request" = "authorization";
+			let aborted = new Promise<never>((_, reject) => {
+				stop = () =>
+					reject(
+						timeout.aborted
+							? new WebSearchTimeoutError(phase)
+							: new Error(`${options.label} aborted`),
+					);
+				if (signal.aborted) stop();
+				else signal.addEventListener("abort", stop, { once: true });
+			});
+			try {
+				let result: unknown;
+				try {
+					result = await Promise.race([
+						(async () => {
+							signal.throwIfAborted();
+							if (!await credential.authorize() || signal.aborted) {
+								throw new Error(`${options.label} authorization ended`);
+							}
+							phase = "request";
+							await deps.onCall?.();
+							signal.throwIfAborted();
+							return options.search(input, { ...toolOptions, abortSignal: signal });
+						})(),
+						aborted,
+					]);
+				} catch (error) {
+					// Only known classifications and numeric codes cross into job logs.
+					let kind = timeout.aborted
+						? "timeout"
+						: signal.aborted
+						? "aborted"
+						: options.classify(error);
+					let diagnostic: WebSearchFailureDiagnostic = {
+						webFailure: `local:${phase}:${kind}`,
+						webFailureDurationMs: Math.round(performance.now() - began),
+					};
+					if (
+						/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+							toolOptions.toolCallId,
+						)
+					) {
+						diagnostic.webFailureToolCallId = toolOptions.toolCallId;
+					}
+					log(`chopin: web_search failed - ${diagnostic.webFailure}`);
+					await deps.onCall?.(undefined, error, diagnostic);
+					throw error;
+				}
+				await deps.onCall?.(result);
+				return result;
+			} finally {
+				signal.removeEventListener("abort", stop);
+			}
+		},
+	});
+}
+
+/** An MCP result that resolved with `isError`, which is no successful search. */
+class McpResultError extends Error {
+	constructor() {
+		super("MCP web_search returned an error");
+		this.name = "McpResultError";
+	}
+}
+
+export function validTimeout(timeoutMs: number): number {
+	if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) {
+		throw new Error("Invalid web search timeout");
+	}
+	return timeoutMs;
+}
+
 export async function webSearchTool(
 	credential: Credential,
-	deps: {
-		createClient?: CreateClient;
-		onCall?: (
-			result?: unknown,
-			error?: unknown,
-			diagnostic?: WebSearchFailureDiagnostic,
-		) => void | Promise<void>;
-		/** A call refused before dispatch, because the call cap or the remaining time is spent. */
-		onRefused?: (reason: "calls" | "time") => void;
-		timeoutMs?: number;
-		/** Budgets calls against the attempt deadline; unset, calls are unbudgeted. */
-		budget?: WebSearchBudget;
-		now?: () => number;
-		log?: (line: string) => void;
-	} = {},
+	deps: WebSearchDeps & { createClient?: CreateClient } = {},
 ): Promise<
 	Result<{ tool: ToolSet["web_search"]; close: () => Promise<void> }, WebSearchSetupError>
 > {
 	// The upstream tool runs an AI research agent, so a valid response can take over a minute.
-	let timeoutMs = deps.timeoutMs ?? 180_000;
-	let now = deps.now ?? Date.now;
+	let timeoutMs = validTimeout(deps.timeoutMs ?? 180_000);
 	let log = deps.log ?? ((line: string) => console.warn(line));
-	let started = 0;
-	if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) {
-		throw new Error("Invalid web search timeout");
-	}
 	let client: Client;
 	let context = { token: credential.token, began: performance.now(), log };
 	try {
@@ -206,116 +342,30 @@ export async function webSearchTool(
 		return {
 			ok: true,
 			value: {
-				tool: tool({
+				tool: budgetedWebSearch({
+					credential,
+					deps,
+					timeoutMs,
+					label: "MCP web_search",
 					description: "Research the public web for evidence about the disclosed research query. "
 						+ "An AI research agent answers with citations; each call may take several minutes. "
 						+ "Ask one focused natural-language question per call. Split comparisons into separate questions.",
-					inputSchema: WEB_SEARCH_SCHEMA.web_search.inputSchema,
-					contextSchema: WebContext,
 					toModelOutput: source.toModelOutput,
-					execute: async (input, options) => {
-						let current = (options.context as z.infer<typeof WebContext>).credential;
-						if (
-							current !== credential || credential.signal?.aborted
-							|| credential.expiresAt.getTime() <= Date.now()
-						) throw new Error("MCP web_search authorization ended");
-						let callTimeoutMs = timeoutMs;
-						if (deps.budget) {
-							let { maxCalls = WEB_SEARCH_MAX_CALLS, marginMs = WEB_SEARCH_MARGIN_MS } =
-								deps.budget;
-							let { minWindowMs = WEB_SEARCH_MIN_WINDOW_MS } = deps.budget;
-							let remaining = deps.budget.deadline.getTime() - now();
-							if (started >= maxCalls) {
-								deps.onRefused?.("calls");
-								return refusal(
-									`web_search call limit reached (${maxCalls} per attempt). `
-										+ "Do not search again; submit your result now from the sources already returned.",
-								);
-							}
-							if (remaining < minWindowMs) {
-								deps.onRefused?.("time");
-								return refusal(
-									"Not enough time remains for another web_search call. "
-										+ "Do not search again; submit your result now from the sources already returned.",
-								);
-							}
-							callTimeoutMs = Math.min(timeoutMs, remaining - marginMs);
+					search: async (input, options) => {
+						let result: unknown = await execute(input, options);
+						if (result && typeof result === "object" && "isError" in result && result.isError) {
+							throw new McpResultError();
 						}
-						started++;
-						let began = performance.now();
-						let resultError = false;
-						let timeout = AbortSignal.timeout(callTimeoutMs);
-						let signal = AbortSignal.any([
-							timeout,
-							...(options.abortSignal ? [options.abortSignal] : []),
-							...(credential.signal ? [credential.signal] : []),
-						]);
-						let stop!: () => void;
-						let phase: "authorization" | "request" = "authorization";
-						let aborted = new Promise<never>((_, reject) => {
-							stop = () =>
-								reject(
-									timeout.aborted
-										? new WebSearchTimeoutError(phase)
-										: new Error("MCP web_search aborted"),
-								);
-							if (signal.aborted) stop();
-							else signal.addEventListener("abort", stop, { once: true });
-						});
-						try {
-							let result: unknown;
-							try {
-								result = await Promise.race([
-									(async () => {
-										signal.throwIfAborted();
-										if (!await credential.authorize() || signal.aborted) {
-											throw new Error("MCP web_search authorization ended");
-										}
-										phase = "request";
-										await deps.onCall?.();
-										signal.throwIfAborted();
-										return execute(input, { ...options, abortSignal: signal });
-									})(),
-									aborted,
-								]);
-								if (result && typeof result === "object" && "isError" in result && result.isError) {
-									resultError = true;
-									throw new Error("MCP web_search returned an error");
-								}
-							} catch (error) {
-								// Only known classifications and numeric MCP codes cross into job logs.
-								let kind = timeout.aborted
-									? "timeout"
-									: signal.aborted
-									? "aborted"
-									: resultError
-									? "mcp-result-error"
-									: MCPClientError.isInstance(error)
-									? "mcp-client"
-									: error instanceof Error
-									? "error"
-									: "unknown";
-								let diagnostic: WebSearchFailureDiagnostic = {
-									webFailure: `local:${phase}:${kind}${mcpCodes(error)}`,
-									webFailureDurationMs: Math.round(performance.now() - began),
-								};
-								if (
-									/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-										options.toolCallId,
-									)
-								) {
-									diagnostic.webFailureToolCallId = options.toolCallId;
-								}
-								log(`chopin: web_search failed - ${diagnostic.webFailure}`);
-								await deps.onCall?.(undefined, error, diagnostic);
-								throw error;
-							}
-							await deps.onCall?.(result);
-							return result;
-						} finally {
-							signal.removeEventListener("abort", stop);
-						}
+						return result;
 					},
+					classify: error =>
+						error instanceof McpResultError
+							? "mcp-result-error"
+							: MCPClientError.isInstance(error)
+							? `mcp-client${mcpCodes(error)}`
+							: error instanceof Error
+							? "error"
+							: "unknown",
 				}),
 				close: () => client.close(),
 			},
