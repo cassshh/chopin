@@ -1,4 +1,4 @@
-import { expect, test } from "./room";
+import { content, expect, test } from "./room";
 import type { Graph } from "../apps/server/src/tasks/graphs";
 
 function drafted(): Graph {
@@ -61,4 +61,22 @@ test("drafted tasks wait for review, and only Approve plan starts them", async (
 	await view.getByRole("button", { name: "Approve plan", exact: true }).click();
 	await expect(page.getByRole("button", { name: "Agent offline", exact: true })).toBeVisible();
 	expect(starts).toEqual([{ planRevision: 0, graphVersion: 1, graphRevision: 1 }]);
+});
+
+test("an edit before approval puts the tasks out of date, so Build plan drafts them again", async ({ seed, join: enter }) => {
+	await seed("# Export\n\nPeople can export a document.\n", { graph: drafted() });
+	let page = await enter(`ana-${crypto.randomUUID().slice(0, 8)}`);
+	await expect(page.getByRole("button", { name: "Approve plan", exact: true })).toBeVisible();
+	await content(page).click();
+	await page.keyboard.press("End");
+	await page.keyboard.type(" As CSV.");
+	await expect(page.getByRole("button", { name: "Build plan", exact: true })).toBeVisible();
+	await expect(page.getByRole("button", { name: "Approve plan", exact: true })).toHaveCount(0);
+	// Never built, so with nothing current to show Build goes back to waiting for a draft.
+	await expect(
+		page.getByRole("group", { name: "Document view" }).getByRole("button", {
+			name: "Build",
+			exact: true,
+		}),
+	).toHaveAttribute("aria-disabled", "true");
 });

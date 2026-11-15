@@ -227,8 +227,13 @@ export function BuildView(
 			return {
 				title: "Ready for review",
 				count: plural(look.tasks, "task", "tasks"),
-				detail: look.blocked
-					?? "Read the tasks below, then Approve plan builds them on your machine. Editing the document drafts them again.",
+				// An element, not a string: a sentence this long wraps instead of fading in on one line.
+				detail: look.blocked ?? (
+					<span>
+						Read the tasks below, then Approve plan builds them on your machine. Editing the
+						document drafts them again.
+					</span>
+				),
 			};
 		}
 		if (look.kind === "plan") {
@@ -255,6 +260,18 @@ export function BuildView(
 			// Who stopped it, the task its agent blocked, or why it failed, as Chat's end line says.
 			if (phase.kind === "drafting" && phase.draft === "returned" && snapshot) {
 				return endedCard(snapshot);
+			}
+			// Drafted for an older revision: say why they are greyed and what brings them up to date.
+			if (phase.kind === "drafting" && phase.draft === "revise" && staleTasks) {
+				return {
+					title: "Tasks out of date",
+					detail: (
+						<span>
+							The document changed after these tasks were drafted. Build plan drafts them again for
+							review.
+						</span>
+					),
+				};
 			}
 			return { title: "Not built yet" };
 		}
