@@ -48,6 +48,7 @@ import type { OrchestrateArguments, OrchestrateResult } from "./agent/orchestrat
 import type { StartPlanBuildResult } from "./tasks/start-build";
 import type { Run, Version } from "./tasks/graphs";
 import type { unapprovedContext } from "./tasks/open-decisions";
+import type { issueLinks } from "./tasks/issues";
 import type { LifecycleArguments } from "./mcp/lifecycle";
 import type { ImplementationLifecycle } from "./tasks/lifecycle";
 
@@ -127,6 +128,8 @@ export type Implementation = {
 	unapprovedDecisions?: NonNullable<ReturnType<typeof unapprovedContext>>["unapprovedDecisions"];
 	/** Where the graph's plan revision's files were pushed, which a build of it starts from. */
 	planSource?: { revision: number; branch: string; commit: string };
+	/** The tasks' GitHub issues, for `Closes #<number>` lines; absent when none was made. */
+	issues?: ReturnType<typeof issueLinks>["issues"];
 };
 
 export type ImplementationInput = {
