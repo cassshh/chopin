@@ -1,4 +1,4 @@
-import { content, expect, roomPath, test } from "./room";
+import { approvePlan, content, expect, roomPath, test } from "./room";
 import { execFileSync, spawn } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -350,7 +350,7 @@ for (let width of [1280, 390]) {
 				"Connected",
 			);
 			await page.goto(testChannelPath(room));
-			await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+			await approvePlan(page);
 			await expect.poll(
 				async () =>
 					(await (await page.request.get(`/api/channels/${room}/implementation`)).json())
@@ -439,9 +439,9 @@ for (let mode of ["block", "complete", "startup-failure", "live"] as const) {
 				page.getByRole("group", { name: "Document view" })
 					.getByRole("button", { name: /^Build/ }).click();
 			await expect(view).toBeHidden();
-			let build = page.getByRole("button", { name: "Approve plan", exact: true });
+			let build = page.getByRole("button", { name: "Review plan", exact: true });
 			await expect(build).not.toHaveAttribute("aria-disabled", "true");
-			await build.click();
+			await approvePlan(page);
 			await expect.poll(async () => {
 				let snapshot = await (await page.request.get(`/api/channels/${room}/implementation`))
 					.json();
@@ -609,7 +609,7 @@ test("a build of a revision whose plan files the Planner pushed starts from thei
 			"Connected",
 		);
 		await page.goto(testChannelPath(room));
-		await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+		await approvePlan(page);
 		await expect.poll(async () => {
 			let snapshot = await (await page.request.get(`/api/channels/${room}/implementation`)).json();
 			return snapshot.build?.state;
@@ -675,7 +675,7 @@ test("a running build shows in Chat's build card with its task, and Chat says wh
 		await page.goto(testChannelPath(room));
 		let chat = page.getByRole("complementary", { name: "Chat", exact: true });
 		await expect(chat.getByRole("region", { name: "Running build" })).toHaveCount(0);
-		await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+		await approvePlan(page);
 
 		// The agent is on its first task: the build heads the strip, unfolded, with that task.
 		await expect.poll(() => access(paused).then(() => true, () => false), { timeout: 30_000 })
@@ -760,7 +760,7 @@ test("a build's agent opens draft pull requests with a token of Chopin's GitHub 
 			"Connected",
 		);
 		await page.goto(testChannelPath(room));
-		await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+		await approvePlan(page);
 		await expect.poll(
 			() => readFile(join(scratch, "gh"), "utf8").catch(() => ""),
 			{ timeout: 30_000 },
@@ -851,7 +851,7 @@ async function expectClearOfPeople(build: import("@playwright/test").Locator) {
 	}
 }
 
-for (let state of ["Approve plan", "Build stopped"] as const) {
+for (let state of ["Review plan", "Build stopped"] as const) {
 	test(`${state} keeps clear of the people here at full and narrow widths`, async ({ seed, join: enter }) => {
 		let graph = preparedGraph();
 		await seed("# Build gap\n\nBuild sits apart from the people here.\n", {
@@ -862,9 +862,9 @@ for (let state of ["Approve plan", "Build stopped"] as const) {
 		// A collaborator's view, with two people here.
 		let other = await enter("bea", { viewport: { width: 1440, height: 900 } });
 		for (let viewer of [page, other]) {
-			// The rightmost build control: Build plan, or the capsule's Retry.
-			let build = state === "Approve plan"
-				? viewer.getByRole("button", { name: "Approve plan", exact: true })
+			// The rightmost build control: Review plan, or the capsule's Retry.
+			let build = state === "Review plan"
+				? viewer.getByRole("button", { name: "Review plan", exact: true })
 				: viewer.getByRole("button", { name: "Retry", exact: true });
 			await expect(
 				viewer.getByRole("group", { name: /^People here/ }).locator(":scope > [data-tooltip]"),
@@ -916,7 +916,7 @@ test(
 	async ({ seed, join: enter }) => {
 		await seed("# Offline build\n\nNo local agent is connected.\n", { graph: preparedGraph() });
 		let page = await enter(person());
-		await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+		await approvePlan(page);
 		let capsule = page.getByRole("button", { name: "Agent offline", exact: true });
 		await expect(capsule).toHaveAccessibleDescription(
 			"Your local agent isn’t connected. Open Build for the command that starts it.",
@@ -959,7 +959,7 @@ test("the agent-offline notice folds to its glyph before the document's title gi
 		},
 	);
 	let page = await enter(person(), { viewport: { width: 1100, height: 800 } });
-	await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+	await approvePlan(page);
 	let notice = page.getByRole("button", { name: "Agent offline", exact: true });
 	await expect(notice).toBeVisible();
 	let shots = process.env.CHOPIN_SHOTS;
@@ -1024,14 +1024,14 @@ test(
 			},
 		);
 		let page = await enter("ana");
-		let plan = page.getByRole("button", { name: "Approve plan", exact: true });
+		let plan = page.getByRole("button", { name: "Review plan", exact: true });
 		await expect(plan).toBeVisible();
 		// Nothing about the open decision holds Build back: no waiting capsule, no inert button.
 		await expect(page.getByRole("button", { name: /decisions? left/ })).toHaveCount(0);
 		await expect(plan).not.toHaveAttribute("aria-disabled", "true");
 		let shots = process.env.CHOPIN_SHOTS;
 		if (shots) await page.screenshot({ path: `${shots}/build-plan-with-open-decision.png` });
-		await plan.click();
+		await approvePlan(page);
 		// The press went ahead; with no local agent connected it stops there, not at the decision.
 		await expect(page.getByRole("button", { name: "Agent offline", exact: true })).toBeVisible();
 		await expect(
@@ -1039,6 +1039,9 @@ test(
 				.getByRole("button", { name: "Build", exact: true }),
 		).toBeEnabled();
 		// The decision stays open on the page, still answerable once the build is done with it.
+		await page.getByRole("group", { name: "Document view" })
+			.getByRole("button", { name: "Document", exact: true })
+			.click();
 		await expect(page.locator(`article[data-plan-sidecar-questionnaire="${widget}"]`).first())
 			.toBeVisible();
 	},
@@ -1078,7 +1081,7 @@ test("a build in progress shows who started it and offers no action", async ({ s
 		await page.getByRole("button", { name: "Add machine", exact: true }).click();
 		await expect(page.getByRole("status").filter({ hasText: "Connected" })).toHaveText("Connected");
 		await page.goto(testChannelPath(room));
-		await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+		await approvePlan(page);
 		let capsule = page.getByRole("button", { name: /^Building 0 of 2/ });
 		await expect(capsule).toBeVisible();
 		await expectClearOfPeople(capsule);
@@ -1280,13 +1283,17 @@ test("edits after a build read as changes to build, and Build sends them to the 
 		await page.getByRole("button", { name: "Add machine", exact: true }).click();
 		await expect(page.getByRole("status").filter({ hasText: "Connected" })).toHaveText("Connected");
 		await page.goto(testChannelPath(room));
-		await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+		await approvePlan(page);
 		let built = page.getByRole("button", { name: "Built", exact: true });
 		await expect(built).toBeVisible({ timeout: 30_000 });
 		await expectClearOfPeople(built);
 		// Beside a built document's capsule there is no Build; only the tab has that name.
 		await expect(page.getByRole("button", { name: "Build", exact: true })).toHaveCount(1);
 
+		// Approving from Build left it open; the edit is made in the document.
+		await page.getByRole("group", { name: "Document view" })
+			.getByRole("button", { name: "Document", exact: true })
+			.click();
 		await content(page).getByText("Validate the local agent connection.").click();
 		await page.keyboard.press("End");
 		await page.keyboard.type(" Then report back.");

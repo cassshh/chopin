@@ -710,7 +710,10 @@ export function firstBuildStep(
  */
 export type BuildLook =
 	| { kind: "plan"; blocked?: string }
-	/** Drafted tasks wait for review: Approve plan approves and starts them, unless `blocked`. */
+	/**
+	 * Drafted tasks wait for review: Review plan opens them in Build, where Approve plan starts them
+	 * (unless `blocked`) and Create issues hands them off.
+	 */
 	| { kind: "review"; tasks: number; tip: string; blocked?: string }
 	| { kind: "tasks"; tip: string }
 	| { kind: "building"; done: number; total: number; tip?: string }
@@ -935,7 +938,7 @@ export function buildLook(snapshot: Snapshot | undefined, context: BuildContext)
 			tasks,
 			tip: `Review the ${
 				plural(tasks, "task", "tasks")
-			} in Build, then approve the plan to start building`,
+			} in Build, then approve the plan or create issues`,
 			...(blocked ? { blocked } : {}),
 		};
 	}
@@ -958,7 +961,7 @@ export function buildLabel(look: BuildLook): string {
 		case "plan":
 			return "Build plan";
 		case "review":
-			return "Approve plan";
+			return "Review plan";
 		case "tasks":
 			return "Preparing tasks";
 		case "building":

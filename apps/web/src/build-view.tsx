@@ -156,6 +156,8 @@ export function BuildView(
 	let [assigning, setAssigning] = useState(false);
 	let [assignees, setAssignees] = useState<Record<string, string>>({});
 	let [creating, setCreating] = useState(false);
+	// Approve plan can also make the tasks GitHub issues first, so the build's pull requests close them.
+	let [trackIssues, setTrackIssues] = useState(false);
 	let people = useDocumentPeople(room, assigning);
 	let [linked, setLinked] = useState<string>();
 	let [now, setNow] = useState(() => Date.now());
@@ -479,7 +481,29 @@ export function BuildView(
 		let blocked = (look.kind === "review" ? look.blocked : undefined) ?? machineOffline;
 		// Once the tasks are issues, building them is the second choice, not the first.
 		let primary = look.kind === "review";
-		action = (
+		let approveAndTrack = async () => {
+			let graph = snapshot?.graph;
+			if (!graph) return;
+			setCreating(true);
+			try {
+				await createIssues(room, {
+					graphNumber: graph.number,
+					graphRevision: graph.revision,
+					assignees: {},
+				});
+			} catch (error) {
+				setActionError(
+					sentenceCase(error instanceof Error ? error.message : "Couldn’t create the issues"),
+				);
+				return;
+			} finally {
+				setCreating(false);
+				build.reload();
+			}
+			// Approves only the tasks on screen, which creating their issues did not change.
+			build.approve();
+		};
+		let approveButton = (
 			<button
 				aria-busy={build.busy || undefined}
 				aria-disabled={blocked || build.busy ? true : undefined}
@@ -489,15 +513,32 @@ export function BuildView(
 				// Offline is said in the card's text above, as the header says it only to screen readers.
 				data-tooltip={look.kind === "review" ? look.blocked : undefined}
 				onClick={() => {
-					if (blocked || build.busy) return;
+					if (blocked || build.busy || creating) return;
 					setActionError(undefined);
-					build.approve();
+					if (look.kind === "review" && trackIssues) void approveAndTrack();
+					else build.approve();
 				}}
 				type="button"
 			>
 				Approve plan
 			</button>
 		);
+		action = look.kind === "review"
+			? (
+				<>
+					<label className="flex items-center gap-1.5 text-text-secondary">
+						<input
+							checked={trackIssues}
+							disabled={creating}
+							onChange={event => setTrackIssues(event.target.checked)}
+							type="checkbox"
+						/>
+						Also track as GitHub issues
+					</label>
+					{approveButton}
+				</>
+			)
+			: approveButton;
 	}
 	if (phase.kind === "stopped" && canEdit && !returning) {
 		action = (
