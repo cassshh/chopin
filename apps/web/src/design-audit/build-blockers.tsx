@@ -13,6 +13,8 @@ let build: BuildPlan = {
 	needsAgent: false,
 	busy: false,
 	press: noop,
+	approve: noop,
+	retry: noop,
 	rebuild: noop,
 	rebuildNeedsAgent: false,
 	rebuilding: false,

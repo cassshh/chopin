@@ -106,9 +106,10 @@ function MachineLabel({ machine }: { machine: BuildMachine }) {
 }
 
 /**
- * The build's status and its tasks. Build only reads: the header's Build plan
- * and capsule start and retry builds, so opening this view never starts one.
- * It keeps the recoveries that need its context, such as Return to planning.
+ * The build's status and its tasks. Opening this view never starts anything: the header's Build
+ * plan drafts tasks, and Approve plan (in the header, or on the review card here, beside the
+ * tasks it approves) starts them. It keeps the recoveries that need its context, such as Return
+ * to planning.
  */
 export function BuildView(
 	{
@@ -221,6 +222,15 @@ export function BuildView(
 
 	let action: ReactNode;
 	function statusCard(): Card {
+		// Drafted tasks wait here for review; Approve plan approves exactly these and starts them.
+		if (look.kind === "review") {
+			return {
+				title: "Ready for review",
+				count: plural(look.tasks, "task", "tasks"),
+				detail: look.blocked
+					?? "Read the tasks below, then Approve plan builds them on your machine. Editing the document drafts them again.",
+			};
+		}
 		if (look.kind === "plan") {
 			// Built before, now back in planning: Build plan in the header builds it again.
 			if (phase.kind === "blocked") {
@@ -246,16 +256,7 @@ export function BuildView(
 			if (phase.kind === "drafting" && phase.draft === "returned" && snapshot) {
 				return endedCard(snapshot);
 			}
-			// Build plan is the approval: pressing it approves these tasks and starts them.
-			return {
-				title: "Not built yet",
-				...(phase.kind === "review"
-					? {
-						count: plural(tasks.length, "task", "tasks"),
-						detail: "Build plan approves these tasks and builds them.",
-					}
-					: {}),
-			};
+			return { title: "Not built yet" };
 		}
 		if (look.kind === "tasks") {
 			return {
@@ -359,6 +360,25 @@ export function BuildView(
 	let when = buildAgo(shown, now);
 	let from = planSourceLine(shown);
 
+	if (look.kind === "review" && canEdit) {
+		let blocked = look.blocked;
+		action = (
+			<button
+				aria-busy={build.busy || undefined}
+				aria-disabled={blocked || build.busy ? true : undefined}
+				className="btn btn-sm btn-primary shrink-0"
+				data-tooltip={blocked}
+				onClick={() => {
+					if (blocked || build.busy) return;
+					setActionError(undefined);
+					build.approve();
+				}}
+				type="button"
+			>
+				Approve plan
+			</button>
+		);
+	}
 	if (phase.kind === "stopped" && canEdit && !returning) {
 		action = (
 			<button
