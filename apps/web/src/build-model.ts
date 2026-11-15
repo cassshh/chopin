@@ -970,15 +970,17 @@ export function retryAction(look: BuildLook): "Retry" | undefined {
 }
 
 /**
- * Build opens once there is a build, tasks to review (out of date ones included, so a person can
- * see what an edit left behind), or a press under way, to show.
+ * Build opens once there is a build, tasks to review, or a press under way, to show. Drafted tasks
+ * stay readable when an edit put them out of date or a blocker holds their approval: a blocker
+ * stops approving them, not reading them.
  */
 export function buildTabReady(snapshot: Snapshot | undefined, look: BuildLook): boolean {
 	if (look.kind !== "plan") return true;
 	if (!snapshot) return false;
-	let staleTasks = buildPhase(snapshot).kind === "drafting"
+	let phase = buildPhase(snapshot).kind;
+	let drafted = (phase === "drafting" || phase === "blocked")
 		&& (snapshot.graph?.definition.tasks.length ?? 0) > 0;
-	return hasBuilt(snapshot) || staleTasks;
+	return hasBuilt(snapshot) || drafted;
 }
 
 /** A running build as Chat's run strip shows it, beside the workflow runs. */

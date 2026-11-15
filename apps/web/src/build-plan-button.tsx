@@ -495,6 +495,10 @@ export function BuildPlanButton(
 		reviewWanted.current = false;
 		onOpen();
 	}, [look.kind]);
+	// Approve plan found the tasks changed and approved nothing: show them, with the reason, in Build.
+	useEffect(() => {
+		if (build.reviewChanged) onOpen();
+	}, [build.reviewChanged]);
 	useLayoutEffect(() => {
 		let was = previous.current;
 		previous.current = look.kind;
