@@ -54,16 +54,21 @@ necessary decisions and investigations in the document and explain them in Chat.
 It never claims an owner or runs an investigation.
 
 Build plan's draft never starts by itself. Once the Planner has saved the tasks,
-the slot reads **Approve plan** and the Build tab opens on a **Ready for review**
-card listing them; nothing is approved and the graph stays a draft. Reading the
-tasks and pressing **Approve plan** (in the header or on the card) sends the
+the slot reads **Review plan** and the Build tab opens on a **Ready for review**
+card listing them; nothing is approved and the graph stays a draft. **Review plan**
+only opens Build, so the two ways on from the tasks, **Approve plan** and **Create
+issues**, are seen side by side. Pressing **Approve plan** on the card sends the
 reviewed graph version and revision to `POST /api/channels/:id/implementation`,
 which approves exactly that draft and queues it in one durable commit, with the
 same refusals as before (machine offline, no workspace, accepted comments,
-required investigations). An edit to the document before approval makes the
+required investigations). With **Also track as GitHub issues** ticked beside it,
+the press first makes the tasks issues (as [Export as GitHub issues](#export-as-github-issues)
+describes, with no assignees) and then approves the same version, so the build's
+pull requests can close them. An edit to the document before approval makes the
 draft stale: the slot goes back to **Build plan**, which drafts the tasks again,
 and an approval of the stale tasks is refused. A chosen machine that is offline
-dims both buttons, as it did the one-click press.
+dims the card's **Approve plan** and says why on the card; **Review plan** stays
+pressable, since reading the tasks needs no machine.
 
 After Approve plan the same slot becomes a status capsule:
 **Breaking into tasks…**, **Building 3 of 8**, **Built**, **N changes to
@@ -318,6 +323,16 @@ This needs the App's Issues permission at **Read and write**. GitHub also lists 
 write for assigning Copilot; without it only that assignment fails, and its task says so. The
 Planner never writes issues. The record lives in `apps/server/src/tasks/issues.ts` and is restored
 strictly: an invalid stored export rejects the document rather than being dropped.
+
+With Issues only **Read**, GitHub still lets the App open and link issues on a repository whose
+issues the presser can write, but refuses to assign them. Chopin checks the installation's
+permissions before it starts: it makes and links the issues, skips every assignment, and records
+on the export that the issues are made but not assigned, with what to change (Issues: Read and
+write, accepted on the installation) before pressing **Create missing issues**.
+
+A build of tasks that have issues hands the coding agent their numbers: `read_implementation`
+returns `issues` (the parent and each task's issue number and URL), and the agent is told to
+write `Closes #<number>` in the body of the task's pull request, so merging it closes the issue.
 
 ## Lock behavior
 
