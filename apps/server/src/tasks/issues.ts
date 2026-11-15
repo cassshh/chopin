@@ -91,6 +91,13 @@ let exportSchema = z.object({
 		.optional(),
 	parent: refSchema.optional(),
 	problem: z.string().min(1).max(300).optional(),
+	/**
+	 * Issues of tasks no longer in the graph, still to be closed as not planned. A task that comes
+	 * back before its issue is closed takes the issue back.
+	 */
+	removed: z.array(z.object({ task: z.string().min(1).max(128), issue: refSchema }).strict())
+		.max(MAX_EXPORTED_TASKS)
+		.optional(),
 	tasks: z.record(z.string().min(1).max(128), entrySchema).refine(
 		tasks => Object.keys(tasks).length <= MAX_EXPORTED_TASKS,
 	),
@@ -296,7 +303,10 @@ export const READ_ONLY_ISSUES =
 	"Made, but not assigned: Chopin's GitHub App can only read issues. Give it Issues: Read and write, then accept the change on its installation, and press Create missing issues.";
 
 /** A failed GitHub step in plain words. */
-export function problemFor(error: unknown, step: "create" | "link" | "block" | "assign"): string {
+export function problemFor(
+	error: unknown,
+	step: "create" | "link" | "block" | "assign" | "close",
+): string {
 	let status = error instanceof GitHubError ? error.status : undefined;
 	if (status === 429) return "GitHub's rate limit was reached. Try again in a few minutes.";
 	if (status === 410) return "Issues are turned off for this repository.";
@@ -305,6 +315,9 @@ export function problemFor(error: unknown, step: "create" | "link" | "block" | "
 	}
 	if (status === 401 || status === 403 || status === 404) {
 		return "Chopin's GitHub App can't write issues here. Give it Issues: Read and write, then try again.";
+	}
+	if (step === "close" && status === 422) {
+		return "GitHub refused to close the issue of a task removed from the document.";
 	}
 	if (status === 422) {
 		return step === "create"
@@ -323,6 +336,8 @@ export type IssueWriter = {
 	addAssignees(issue: number, assignment: GitHubAssignment): Promise<string[]>;
 	/** Issues `creator` opened that changed since `since`; optional where they can't be listed. */
 	issuesBy?(creator: string, since: string): Promise<GitHubIssueBody[]>;
+	/** Close an issue as not planned; optional where issues are never closed. */
+	closeIssue?(issue: number): Promise<void>;
 };
 
 export type ExportContext = {
@@ -541,11 +556,28 @@ async function run(
 				}
 			}
 			unresolved = unresolved.slice(-MAX_UNRESOLVED);
+			// Issues of tasks the graph no longer has wait to be closed; a task that came back before
+			// its issue was closed takes it back.
+			let removed = [...previous?.removed ?? []];
+			for (let [id, entry] of Object.entries(previous?.tasks ?? {})) {
+				if (
+					!ids.has(id) && entry.issue && !removed.some(item => item.issue.id === entry.issue!.id)
+				) {
+					removed.push({ task: id, issue: entry.issue });
+				}
+			}
+			removed = removed.filter(item => {
+				let back = ids.has(item.task) ? kept[item.task] : undefined;
+				if (!back) return true;
+				if (!back.issue) back.issue = item.issue;
+				return false;
+			}).slice(-MAX_EXPORTED_TASKS);
 			plan.issues = {
 				...expected,
 				by: input.by,
 				at: new Date().toISOString(),
 				...(unresolved.length > 0 ? { unresolved } : {}),
+				...(removed.length > 0 ? { removed } : {}),
 				...(previous?.parent ? { parent: previous.parent } : {}),
 				tasks: kept,
 			};
@@ -756,6 +788,26 @@ async function run(
 			}
 		}
 	}
+	// Close the issues of tasks removed from the graph, each as GitHub confirms it.
+	let closed = 0;
+	let closeIssue = context.github.closeIssue;
+	if (closeIssue) {
+		for (let item of (await state()).removed ?? []) {
+			let done = await step(
+				() => closeIssue(item.issue.number),
+				problem => save(issues => void (issues.problem = problem)),
+				"close",
+			);
+			if (!done) continue;
+			closed++;
+			await save(issues => {
+				let left = (issues.removed ?? []).filter(other => other.issue.id !== item.issue.id);
+				if (left.length > 0) issues.removed = left;
+				else delete issues.removed;
+			});
+		}
+	}
+
 	// Every issue recorded: no earlier press's issues need looking for any more.
 	let finished = await state();
 	if (
@@ -764,14 +816,22 @@ async function run(
 	) {
 		await save(issues => void delete issues.unresolved);
 	}
-	if (madeParent || made.length > 0) {
+	if (madeParent || made.length > 0 || closed > 0) {
 		let link = `[#${parent.number}](${parent.url})`;
 		let count = `${made.length} ${made.length === 1 ? "issue" : "issues"}`;
+		let closing = closed > 0
+			? `closed ${closed} ${closed === 1 ? "issue" : "issues"} of tasks removed from the document`
+			: "";
+		let text = madeParent
+			? `@${input.by} made this document’s tasks into ${link} with ${count} under it.`
+			: made.length > 0
+			? `@${input.by} added ${count} under ${link}${closing ? ` and ${closing}` : ""}.`
+			: `@${input.by} ${closing} under ${link}.`;
 		let notice = {
-			id: `issues:${parent.number}:${madeParent ? "parent" : ""}:${made.join(",")}`,
-			text: madeParent
-				? `@${input.by} made this document’s tasks into ${link} with ${count} under it.`
-				: `@${input.by} added ${count} under ${link}.`,
+			id: `issues:${parent.number}:${madeParent ? "parent" : ""}:${made.join(",")}${
+				closed > 0 ? `:closed:${closed}` : ""
+			}`,
+			text,
 		};
 		// Only scheduled here: Chat's line takes the document lock once this action lets it go.
 		await context.withPlan(async plan => plan.persistence.onBuildNotice?.(plan.id, notice));

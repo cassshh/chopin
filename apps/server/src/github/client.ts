@@ -221,6 +221,8 @@ export interface GitHub {
 		issue: number,
 		blocker: number,
 	): Promise<void>;
+	/** Close an issue as not planned, as the token's user. */
+	closeIssue?(token: string, owner: string, name: string, issue: number): Promise<void>;
 	/** Assign an issue; answers the logins GitHub now has on it, which omits any it refused. */
 	addAssignees?(
 		token: string,
@@ -954,6 +956,13 @@ export class GitHubClient implements GitHub, GitHubReferenceSource {
 		);
 	}
 
+	async closeIssue(token: string, owner: string, name: string, issue: number): Promise<void> {
+		await this.#send("PATCH", `${repoPath(owner, name)}/issues/${issue}`, token, {
+			state: "closed",
+			state_reason: "not_planned",
+		});
+	}
+
 	async addAssignees(
 		token: string,
 		owner: string,
@@ -1150,7 +1159,7 @@ export class GitHubClient implements GitHub, GitHubReferenceSource {
 
 	/** A write; never retried, because GitHub may have done it even when the answer was lost. */
 	async #send(
-		method: "POST",
+		method: "POST" | "PATCH",
 		path: string,
 		token: string,
 		payload: unknown,
