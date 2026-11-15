@@ -302,10 +302,14 @@ issues it depends on. Every body ends with a hidden `<!-- chopin:<document>:<tas
 A step that fails is recorded on its task in plain words and the others go ahead; pressing
 **Create missing issues** again does only what is missing, so an issue Chopin recorded is never
 created twice. A GitHub refusal is the task's problem; a failure to save what GitHub made ends the
-press before anything is linked to it. Before it makes anything, a press after an earlier one lists
-the presser's issues since that press and takes back, by its marker, any issue that press made but
-never recorded (its answer lost, or its save failed), so it is not made a second time. A task whose
-ID is longer than 128 characters is refused before anything is kept. Issues already made for a task keep their link when the graph is revised and the
+press before anything is linked to it. Each press that leaves something unmade is
+remembered with its presser and start (`unresolved`, at most 10, cleared once every issue is
+recorded). Before it makes anything, the next press lists each of those presser's own issues since
+their press and takes back, by its marker, any issue made but never recorded (its answer lost, or
+its save failed), so it is not made a second time, whoever presses again. Only those people's
+issues are looked at, so a marker someone else writes into an issue is never taken. A task ID
+longer than 128 characters, or `__proto__`, is refused before anything is kept, and a revised
+task keeps only the blocked-by links of its current dependencies. Issues already made for a task keep their link when the graph is revised and the
 task keeps its ID; edits to the task do not reach its issue. One export per document runs at a
 time.
 
