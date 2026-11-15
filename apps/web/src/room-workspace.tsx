@@ -2319,6 +2319,7 @@ export function RoomWorkspace(
 								build={build}
 								canEdit={!!workspaceCanEdit && shownConnected}
 								comments={acceptedComments}
+								machineOffline={offlineChoice(machineChoice.state)}
 								onShowDocument={() => selectDestination("plan")}
 								room={room}
 								userId={userId}

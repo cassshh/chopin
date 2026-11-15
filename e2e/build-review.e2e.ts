@@ -72,11 +72,12 @@ test("an edit before approval puts the tasks out of date, so Build plan drafts t
 	await page.keyboard.type(" As CSV.");
 	await expect(page.getByRole("button", { name: "Build plan", exact: true })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Approve plan", exact: true })).toHaveCount(0);
-	// Never built, so with nothing current to show Build goes back to waiting for a draft.
-	await expect(
-		page.getByRole("group", { name: "Document view" }).getByRole("button", {
-			name: "Build",
-			exact: true,
-		}),
-	).toHaveAttribute("aria-disabled", "true");
+	// The out-of-date tasks stay one tab away, with why they are greyed and what brings them back.
+	await page.getByRole("group", { name: "Document view" })
+		.getByRole("button", { name: "Build", exact: true })
+		.click();
+	let view = page.getByRole("region", { name: "Build", exact: true });
+	await expect(view.getByText("Tasks out of date", { exact: true })).toBeVisible();
+	await expect(view.getByText(/Build plan drafts them again for review/)).toBeVisible();
+	await expect(view.getByRole("button", { name: "Approve plan", exact: true })).toHaveCount(0);
 });

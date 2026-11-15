@@ -15,6 +15,7 @@ let build: BuildPlan = {
 	press: noop,
 	approve: noop,
 	retry: noop,
+	reviewChanged: false,
 	rebuild: noop,
 	rebuildNeedsAgent: false,
 	rebuilding: false,
