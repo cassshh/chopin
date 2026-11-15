@@ -591,6 +591,22 @@ export function registerImplementationRoutes(router: Router, auth: HostedAuth, o
 			if (!createIssue || !addSubIssue || !addBlockedBy || !addAssignees) {
 				throw new GitHubError("this server cannot create issues", 501);
 			}
+			// With Issues read-only the App can still open and link issues on a public repository, as
+			// anyone may open one, but never assign them: the export skips assigning and says why.
+			let installedRepository = github.installedRepository;
+			let installed = installedRepository
+				? await auth.sessions.use(
+					session,
+					token =>
+						installedRepository.call(
+							github,
+							token,
+							channel.repositoryOwner,
+							channel.repositoryName,
+						),
+				).then(result => result.value, () => undefined)
+				: undefined;
+			let canAssign = installed?.installation.writable?.issues !== false;
 			// Each call runs as the presser; the repository's current name, checked against its node ID.
 			let as = async <T>(call: (token: string) => Promise<T>) =>
 				(await auth.sessions.use(session, call)).value;
@@ -605,6 +621,7 @@ export function registerImplementationRoutes(router: Router, auth: HostedAuth, o
 					.href,
 				repository: `${owner}/${name}`,
 				defaultBranch: repository.defaultBranch,
+				canAssign,
 				withPlan: action => options.withPlan(id, action),
 				github: {
 					createIssue: issue => as(token => createIssue.call(github, token, owner, name, issue)),

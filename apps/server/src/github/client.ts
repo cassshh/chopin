@@ -73,7 +73,7 @@ export type GitHubInstallation = {
 		issues: boolean;
 	};
 	/** Whether it may write contents and pull requests, so its users' tokens can push and open PRs. */
-	writable?: { contents: boolean; pullRequests: boolean };
+	writable?: { contents: boolean; pullRequests: boolean; issues?: boolean };
 };
 
 export type InstallationPage = {
@@ -388,6 +388,7 @@ function installation(value: unknown): GitHubInstallation {
 		writable: {
 			contents: permissions.contents === "write",
 			pullRequests: permissions.pull_requests === "write",
+			issues: permissions.issues === "write",
 		},
 	};
 }

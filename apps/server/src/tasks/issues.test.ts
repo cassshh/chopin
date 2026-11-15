@@ -7,8 +7,10 @@ import {
 	COPILOT,
 	dependencyOrder,
 	exportIssues,
+	issueLinks,
 	issuesSnapshot,
 	parentIssue,
+	READ_ONLY_ISSUES,
 	restoreIssues,
 	taskIssue,
 } from "./issues";
@@ -300,6 +302,46 @@ describe("exportIssues", () => {
 			expect(result.tasks.model?.assigned).toBeUndefined();
 			expect(result.tasks.model?.problem).toContain("Couldn't assign this issue");
 			expect(result.tasks.ui?.issue).toBeDefined();
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("with read-only Issues it still makes and links the issues, and says why it didn't assign", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			let { calls, github } = fakeGitHub();
+			let result = await exportIssues(
+				{ ...exportContext(github), canAssign: false },
+				input({ model: "ana" }),
+			);
+			expect(calls.filter(call => call.kind === "create")).toHaveLength(4);
+			expect(calls.filter(call => call.kind === "assign")).toEqual([]);
+			expect(result.tasks.model).toMatchObject({ assignee: "ana", problem: READ_ONLY_ISSUES });
+			expect(result.tasks.model?.assigned).toBeUndefined();
+			expect(result.tasks.api?.problem).toBeUndefined();
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("hands the coding agent each task's issue so its pull request closes it", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			expect(issueLinks(context.plan)).toEqual({});
+			let { github } = fakeGitHub();
+			await exportIssues(exportContext(github), input());
+			let links = issueLinks(context.plan).issues!;
+			expect(links.parent).toEqual({
+				number: 1,
+				url: "https://github.com/owner/repository/issues/1",
+			});
+			expect(links.tasks).toEqual({
+				model: { number: 2, url: "https://github.com/owner/repository/issues/2" },
+				api: { number: 3, url: "https://github.com/owner/repository/issues/3" },
+				ui: { number: 4, url: "https://github.com/owner/repository/issues/4" },
+			});
+			expect(links.instructions).toContain("Closes #<number>");
 		} finally {
 			await Service.close(context.plan);
 		}
