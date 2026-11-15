@@ -128,6 +128,29 @@ export type BuildMachine = {
 	 */
 	connected?: boolean;
 };
+/**
+ * The GitHub issues a document's tasks were exported as: a parent issue, and per task its issue,
+ * the assignee picked for it and why the last attempt stopped short, when it did.
+ */
+export type IssueExportSnapshot = {
+	/** The GitHub login of whoever last pressed Create issues. */
+	by: string;
+	/** Whether the export was made for the graph version shown; tasks edited since are not in it. */
+	current: boolean;
+	/** Issues are being created now. */
+	running: boolean;
+	parent?: { number: number; url: string };
+	/** Why creating the parent issue failed, which stops every task's. */
+	problem?: string;
+	tasks: Record<string, {
+		number?: number;
+		url?: string;
+		/** A GitHub login, or `copilot` for Copilot's coding agent. */
+		assignee?: string;
+		assigned?: true;
+		problem?: string;
+	}>;
+};
 /** A rebuild as people other than its builder see it. */
 export type LiveRebuild = Omit<BuildRequest, "connectionId" | "checkout" | "session">;
 export type ImplementationSnapshot = {
@@ -186,6 +209,7 @@ export type ImplementationSnapshot = {
 	buildRequested?: { by: string; revision: number };
 	lifecycle: Pick<Plan.Lifecycle, "execution" | "activity" | "history">;
 	live?: LiveSnapshot;
+	issues?: IssueExportSnapshot;
 };
 
 /**
