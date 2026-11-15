@@ -30,6 +30,8 @@ services:
       SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY}
       STORAGE_DRIVER: postgres
       WEB_RESEARCH: ${WEB_RESEARCH}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER}
+      WEB_SEARCH_MODEL: ${WEB_SEARCH_MODEL}
     depends_on:
       db:
         condition: service_healthy

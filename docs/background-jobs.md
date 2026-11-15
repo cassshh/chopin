@@ -519,9 +519,11 @@ returning output that matches its `output` schema.
 
 ### Public research worker
 
-Only the public evidence agent binds a host `web_search` tool, reached through
-`createMCPClient` against GitHub MCP's `web_search` toolset, and lists it as
-its only `activeTools` entry. Never give one agent both private document
+Only the public evidence agent binds a host `web_search` tool, and lists it as
+its only `activeTools` entry. It is reached through `createMCPClient` against
+GitHub MCP's `web_search` toolset, or, under `WEB_SEARCH_PROVIDER=gemini`,
+through Gemini's Google Search grounding (`harness/gemini-search.ts`); both share
+one budget, timeout and failure path (`budgetedWebSearch` in `harness/web-search.ts`). Never give one agent both private document
 context and public web capability.
 
 The public evidence worker receives only the submitted brief. An isolated
