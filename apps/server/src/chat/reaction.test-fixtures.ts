@@ -23,7 +23,7 @@ export function scripted(
 		let answers: Record<string, JevAnswer> = {};
 		for (let key of Object.keys(request.questions)) {
 			if (key === "input") answers.input = { type: "noul", noul: 0 };
-			if (!key.startsWith("intent:")) continue;
+			if (!key.startsWith("intent_")) continue;
 			let { intent, probability, confidence } = scores
 				?? { intent: "confused", probability: 0.9, confidence: 0.88 };
 			let rest = (1 - probability) / 5;
