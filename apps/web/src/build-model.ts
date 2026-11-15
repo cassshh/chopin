@@ -721,7 +721,12 @@ export type BuildLook =
 	/** `blocked` is why Build is inert, like Build plan's reason. */
 	| { kind: "stale"; changes: number; live: boolean; tip: string; build: boolean; blocked?: string }
 	| { kind: "rebuilding"; tip: string }
-	| { kind: "failed"; tip: string; retry: boolean; blocked?: string };
+	| { kind: "failed"; tip: string; retry: boolean; blocked?: string }
+	/**
+	 * The tasks were made into GitHub issues under `parent` and nothing was built; `build` offers
+	 * building them on an agent all the same.
+	 */
+	| { kind: "issued"; parent: number; tip: string; build: boolean };
 
 export type BuildContext = {
 	state: FirstBuild;
@@ -910,6 +915,17 @@ export function buildLook(snapshot: Snapshot | undefined, context: BuildContext)
 			retry,
 		};
 	}
+	// Tasks made into issues and not built: the slot names the issues, and Approve plan still builds them.
+	let issues = snapshot.issues;
+	if (phase.kind === "review" && issues?.parent && issues.current && !issues.running) {
+		let blocked = !context.connected ? "Chopin isn’t connected" : blockerReason(snapshot);
+		return {
+			kind: "issued",
+			parent: issues.parent.number,
+			tip: `These tasks are GitHub issues under #${issues.parent.number}`,
+			build: context.canEdit && !blocked,
+		};
+	}
 	if (phase.kind === "review") {
 		let tasks = snapshot.graph?.definition.tasks.length ?? 0;
 		// Starting drafted tasks needs no Planner; only the connection and readiness hold it.
@@ -961,6 +977,8 @@ export function buildLabel(look: BuildLook): string {
 			return "Building changes…";
 		case "failed":
 			return "Build failed";
+		case "issued":
+			return `Issues in #${look.parent}`;
 	}
 }
 
@@ -983,7 +1001,8 @@ export function buildTabReady(snapshot: Snapshot | undefined, look: BuildLook): 
 	let phase = buildPhase(snapshot).kind;
 	let drafted = (phase === "drafting" || phase === "blocked")
 		&& (snapshot.graph?.definition.tasks.length ?? 0) > 0;
-	return hasBuilt(snapshot) || drafted;
+	// Tasks made into GitHub issues are a result too, so their links stay one tab away.
+	return hasBuilt(snapshot) || drafted || !!snapshot.issues?.parent;
 }
 
 /** A running build as Chat's run strip shows it, beside the workflow runs. */

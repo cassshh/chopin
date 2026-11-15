@@ -1163,6 +1163,41 @@ describe("build status", () => {
 		});
 		expect(look(returned).kind).toBe("plan");
 		expect(buildTabReady(returned, look(returned))).toBe(true);
+		// Tasks made into issues, with nothing built, keep Build open after a reload.
+		let exported = snapshot({
+			issues: {
+				by: "ana",
+				current: true,
+				running: false,
+				parent: { number: 18, url: "https://github.com/o/r/issues/18" },
+				tasks: { a: { number: 19, url: "https://github.com/o/r/issues/19" } },
+			},
+		});
+		expect(buildTabReady(exported, look(exported))).toBe(true);
+	});
+
+	it("names the parent issue instead of Build plan once the tasks are issues, and still offers Build", () => {
+		let issues = {
+			by: "ana",
+			current: true,
+			running: false,
+			parent: { number: 18, url: "https://github.com/o/r/issues/18" },
+			tasks: { a: { number: 19, url: "https://github.com/o/r/issues/19" } },
+		};
+		let exported = look(snapshot({ issues }));
+		expect(exported).toEqual({
+			kind: "issued",
+			parent: 18,
+			tip: "These tasks are GitHub issues under #18",
+			build: true,
+		});
+		expect(buildLabel(exported)).toBe("Issues in #18");
+		// A reader sees the issues but is offered no Build.
+		expect(look(snapshot({ issues }), { canEdit: false })).toMatchObject({ build: false });
+		// Edited since, or still being made, the slot goes back to Build plan or what is under way.
+		expect(look(snapshot({ issues: { ...issues, current: false } })).kind).toBe("plan");
+		expect(look(snapshot({ issues: { ...issues, running: true } })).kind).toBe("plan");
+		expect(look(snapshot({ issues, planRevision: 5 })).kind).not.toBe("issued");
 	});
 });
 
