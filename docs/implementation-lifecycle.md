@@ -309,11 +309,19 @@ their press and takes back, by its marker, any issue made but never recorded (it
 its save failed), so it is not made a second time, whoever presses again. Only those people's
 issues are looked at, so a marker someone else writes into an issue is never taken. A listing that
 fails ends the press with nothing made, since it can't tell whether the issue exists. An export is
-refused while a build of the tasks is queued or running, and a build or a coding agent's claim
-waits while an export runs, so no build reads half-made issue links. A task ID
+refused while a build of the tasks is queued or running, and a build, a rebuild or a coding agent's
+claim waits while an export runs, so no build reads half-made issue links.
+
+A task removed from the graph since the last export has its issue closed as not planned by the next
+press (Create missing issues, or Approve plan with **Also track as GitHub issues**), and Chat says
+how many were closed. Until GitHub confirms the close, the issue stays in the export's `removed`
+list, so a refused close is tried again, and a task that comes back meanwhile takes its issue back
+instead of getting a new one. Nothing closes an issue without a press: the Planner revising the
+tasks never writes to GitHub. A task ID
 longer than 128 characters, or `__proto__`, is refused before anything is kept, and a revised
 task keeps only the blocked-by links of its current dependencies. Issues already made for a task keep their link when the graph is revised and the
-task keeps its ID; edits to the task do not reach its issue. One export per document runs at a
+task keeps its ID; edits to the task do not reach its issue, and a removed task's issue is closed
+(below). One export per document runs at a
 time.
 
 This needs the App's Issues permission at **Read and write**. GitHub also lists Actions read and
