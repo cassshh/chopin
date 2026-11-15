@@ -551,9 +551,10 @@ GEMINI_API_KEY=...
 
 The research worker sees the same tool, with the same per-attempt budget (at most four calls, each
 timed out) and the same rule that it may cite only URLs the search returned. Gemini names its
-sources by `vertexaisearch.cloud.google.com` redirect links; Chopin follows each one once to the
-page it points to and offers that page's own HTTPS URL as the citable source, leaving out any it
-cannot resolve. A grounded answer usually takes seconds rather than GitHub's minutes.
+sources by `vertexaisearch.cloud.google.com` redirect links; Chopin asks Google for each one once,
+without following it, reads the HTTPS page it redirects to, and offers that URL as the citable
+source, leaving out any it cannot resolve. The server never requests the page itself. Only these
+sources count: the answer text can't add a citable URL. A grounded answer usually takes seconds rather than GitHub's minutes.
 
 Know what changes with it:
 

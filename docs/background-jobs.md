@@ -534,9 +534,14 @@ analysis.
 
 Accepted public sources must be canonical public HTTPS URLs observed in
 successful web-search citation or typed-resource metadata. Bare URLs in model
-prose do not establish provenance. Chopin never follows, resolves, or fetches a
-source URL, and generated reports may cite only URLs retained in normalized
-evidence. This validates provenance, not factual accuracy or page safety.
+prose do not establish provenance. Chopin never fetches a source page, and
+generated reports may cite only URLs retained in normalized evidence. The one
+exception to resolving a URL is Gemini's: under `WEB_SEARCH_PROVIDER=gemini`,
+each grounding link Google returns (`vertexaisearch.cloud.google.com/grounding-api-redirect/…`)
+is requested once from Google, without following the redirect, and the HTTPS
+`Location` it answers becomes the source URL. No request reaches the destination
+page. Gemini's answer text is labelled so it can never parse as JSON, so only
+those resolved grounding sources establish provenance. This validates provenance, not factual accuracy or page safety.
 
 ### Executor-owned limits
 
