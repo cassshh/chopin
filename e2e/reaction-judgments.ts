@@ -22,11 +22,11 @@ export function reactionJudgment(
 	let state = request.state as {
 		items?: Array<{ id: string; reaction: { emoji: string } }>;
 	};
-	let ids = Object.keys(request.questions).filter(key => key.startsWith("intent:"));
+	let ids = Object.keys(request.questions).filter(key => key.startsWith("intent_"));
 	if (!ids.length || !Array.isArray(state?.items)) return;
 	let answers: JevResult["answers"] = {};
 	for (let key of ids) {
-		let id = key.slice("intent:".length);
+		let id = key.slice("intent_".length);
 		let item = state.items.find(value => value.id === id);
 		let reading = READINGS[item?.reaction.emoji.replaceAll("\uFE0F", "") ?? ""]
 			?? { intent: "none", probability: 0.6 };
