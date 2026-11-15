@@ -1125,7 +1125,14 @@ export class GitHubClient implements GitHub, GitHubReferenceSource {
 			: [401, 403, 404, 410, 422].includes(response.status)
 			? response.status
 			: 502;
-		throw new GitHubError("GitHub API rejected the request", status);
+		// GitHub's own reason (e.g. "Resource not accessible by integration"), short and token-free,
+		// so a refused write can be told apart in the server log.
+		let reason = "";
+		try {
+			let message = record(await response.clone().json())?.message;
+			if (typeof message === "string") reason = `: ${message.replace(/\s+/g, " ").slice(0, 160)}`;
+		} catch {}
+		throw new GitHubError(`GitHub API rejected the request${reason}`, status);
 	}
 
 	async #request(
