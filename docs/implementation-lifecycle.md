@@ -287,7 +287,10 @@ checks.
 ## Export as GitHub issues
 
 A drafted or built graph can also end in work items instead of a local build. Once tasks exist and
-no build is running, a writer sees **Create issues** on the Build tab's status card. It lists the
+no build is running, a writer sees **Create issues** on the Build tab's status card: at review it
+sits beside **Approve plan**, as the other way on from the drafted tasks. After the export the header
+reads **Issues in #N** with **Approve plan** as a secondary action, and the card **Handed off as
+issues**, so the same tasks can still be built on a machine. It lists the
 tasks with an assignee for each: nobody, Copilot (Copilot coding agent, which must be enabled on the
 repository), or a repository collaborator. Pressing **Create N issues** sends
 `POST /api/channels/:id/implementation/issues`, which:

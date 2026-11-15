@@ -1176,7 +1176,7 @@ describe("build status", () => {
 		expect(buildTabReady(exported, look(exported))).toBe(true);
 	});
 
-	it("names the parent issue instead of Build plan once the tasks are issues, and still offers Build", () => {
+	it("names the parent issue instead of Approve plan once the tasks are issues, and still offers Approve plan", () => {
 		let issues = {
 			by: "ana",
 			current: true,
@@ -1192,11 +1192,12 @@ describe("build status", () => {
 			build: true,
 		});
 		expect(buildLabel(exported)).toBe("Issues in #18");
-		// A reader sees the issues but is offered no Build.
+		// A reader sees the issues but is offered no Approve plan.
 		expect(look(snapshot({ issues }), { canEdit: false })).toMatchObject({ build: false });
-		// Edited since, or still being made, the slot goes back to Build plan or what is under way.
-		expect(look(snapshot({ issues: { ...issues, current: false } })).kind).toBe("plan");
-		expect(look(snapshot({ issues: { ...issues, running: true } })).kind).toBe("plan");
+		// Issues made for an older version of the tasks, or still being made: the tasks are back
+		// under review, where Approve plan or Create issues takes them on.
+		expect(look(snapshot({ issues: { ...issues, current: false } })).kind).toBe("review");
+		expect(look(snapshot({ issues: { ...issues, running: true } })).kind).toBe("review");
 		expect(look(snapshot({ issues, planRevision: 5 })).kind).not.toBe("issued");
 	});
 });
