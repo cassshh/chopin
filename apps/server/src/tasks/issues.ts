@@ -75,6 +75,40 @@ export const assigneesSchema = z.record(
 	z.union([login, z.literal(COPILOT), z.null()]),
 ).refine(value => Object.keys(value).length <= MAX_EXPORTED_TASKS);
 
+/**
+ * The GitHub issues of the tasks a build implements, for the coding agent: each pull request that
+ * implements a task says `Closes #n`, so GitHub links it to the task's issue and closes the issue
+ * when it merges. Nothing when the tasks were never made into issues.
+ */
+export function issueLinks(plan: Plan): {
+	issues?: {
+		instructions: string;
+		parent?: { number: number; url: string };
+		tasks: Record<string, { number: number; url: string }>;
+	};
+} {
+	let issues = plan.issues;
+	let graph = plan.graph?.versions.at(-1);
+	if (!issues || !graph) return {};
+	let tasks = Object.fromEntries(
+		graph.definition.tasks.flatMap(task => {
+			let issue = issues.tasks[task.id]?.issue;
+			return issue ? [[task.id, { number: issue.number, url: issue.url }]] : [];
+		}),
+	);
+	if (Object.keys(tasks).length === 0) return {};
+	return {
+		issues: {
+			instructions:
+				"These tasks are GitHub issues. In the body of the pull request that implements a task, put a line `Closes #<number>` for that task's issue, one line per task it implements, so GitHub links the pull request and closes the issue when it merges.",
+			...(issues.parent
+				? { parent: { number: issues.parent.number, url: issues.parent.url } }
+				: {}),
+			tasks,
+		},
+	};
+}
+
 /** What the browser shows of an export: issue links, assignees and any step that failed. */
 export function issuesSnapshot(plan: Plan, running: boolean): IssueExportSnapshot | undefined {
 	let issues = plan.issues;
@@ -218,6 +252,10 @@ export function dependencyOrder(tasks: Task[]): Task[] {
 	return ordered;
 }
 
+/** Why an issue was made but not assigned when the App may only read issues. */
+export const READ_ONLY_ISSUES =
+	"Made, but not assigned: Chopin's GitHub App can only read issues. Give it Issues: Read and write, then accept the change on its installation, and press Create missing issues.";
+
 /** A failed GitHub step in plain words. */
 export function problemFor(error: unknown, step: "create" | "link" | "block" | "assign"): string {
 	let status = error instanceof GitHubError ? error.status : undefined;
@@ -253,6 +291,8 @@ export type ExportContext = {
 	/** `owner/name`, for Copilot's assignment. */
 	repository: string;
 	defaultBranch?: string;
+	/** False when the App may only read issues: issues are still made and linked, never assigned. */
+	canAssign?: boolean;
 	/** Runs `action` with the room locked, as the routes' `withPlan` does. */
 	withPlan<T>(action: (plan: Plan) => Promise<T>): Promise<T>;
 	github: IssueWriter;
@@ -491,7 +531,12 @@ async function run(
 			}
 		}
 		let assignee = entry.assignee;
-		if (assignee && !entry.assigned) {
+		if (assignee && !entry.assigned && context.canAssign === false) {
+			let problem = READ_ONLY_ISSUES;
+			await save(issues => {
+				issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
+			});
+		} else if (assignee && !entry.assigned) {
 			let copilot = assignee === COPILOT;
 			try {
 				let assigned = await context.github.addAssignees(issue.number, {
