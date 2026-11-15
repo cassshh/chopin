@@ -314,15 +314,21 @@ issues it depends on. Every body ends with a hidden `<!-- chopin:<document>:<tas
 
 A step that fails is recorded on its task in plain words and the others go ahead; pressing
 **Create missing issues** again does only what is missing, so an issue Chopin recorded is never
-created twice. An answer GitHub lost after creating an issue can still leave a duplicate, which
-the marker finds. Issues already made for a task keep their link when the graph is revised and the
+created twice. A GitHub refusal is the task's problem; a failure to save what GitHub made ends the
+press before anything is linked to it. Before it makes anything, a press after an earlier one lists
+the presser's issues since that press and takes back, by its marker, any issue that press made but
+never recorded (its answer lost, or its save failed), so it is not made a second time. A task whose
+ID is longer than 128 characters is refused before anything is kept. Issues already made for a task keep their link when the graph is revised and the
 task keeps its ID; edits to the task do not reach its issue. One export per document runs at a
 time.
 
 This needs the App's Issues permission at **Read and write**. GitHub also lists Actions read and
 write for assigning Copilot; without it only that assignment fails, and its task says so. The
 Planner never writes issues. The record lives in `apps/server/src/tasks/issues.ts` and is restored
-strictly: an invalid stored export rejects the document rather than being dropped.
+strictly: an invalid stored export rejects the document rather than being dropped. **Handed off as
+issues** shows only once the parent and every task's issue exist; with **Also track as GitHub
+issues**, Approve plan starts the build only when the export made all of them, and otherwise leaves
+the failures on the card for **Create missing issues**.
 
 With Issues only **Read**, GitHub still lets the App open and link issues on a repository whose
 issues the presser can write, but refuses to assign them. Chopin checks the installation's
@@ -330,8 +336,8 @@ permissions before it starts: it makes and links the issues, skips every assignm
 on the export that the issues are made but not assigned, with what to change (Issues: Read and
 write, accepted on the installation) before pressing **Create missing issues**.
 
-A build of tasks that have issues hands the coding agent their numbers: `read_implementation`
-returns `issues` (the parent and each task's issue number and URL), and the agent is told to
+A build of tasks that have issues hands the coding agent their numbers: `read_implementation`,
+on a paired machine and on `/mcp` alike, returns `issues` (the parent and each task's issue number and URL), and the agent is told to
 write `Closes #<number>` in the body of the task's pull request, so merging it closes the issue.
 
 ## Lock behavior
