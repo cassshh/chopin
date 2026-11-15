@@ -13,6 +13,7 @@ import {
 	transition,
 } from "./lifecycle";
 import { announceImplementation } from "./notifications";
+import { exporting } from "./exporting";
 import { planSourceFor, planSourceSchema } from "./plan-source";
 import { endedReason } from "./build-ending";
 import { drain, exclusive, persistExclusive, source } from "../plan/service";
@@ -303,6 +304,8 @@ export async function queueBuild(plan: Plan, input: BuildInput): Promise<BuildRe
 				plan.execution
 				|| plan.builds.some(build => ["queued", "starting", "running"].includes(build.state))
 			) throw new Error("implementation is already active");
+			// Issues being made for these tasks: the build waits until their links are all there.
+			if (exporting(plan.id)) throw new Error("issues are being created for these tasks");
 			let ready = await planningReadiness(plan, buildFields.planRevision);
 			if (!ready.ok) throw new Error(ready.blockers.join(", "));
 			let id = crypto.randomUUID();

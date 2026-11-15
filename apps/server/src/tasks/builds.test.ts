@@ -3,6 +3,7 @@ import { openPlan } from "../testing/plan";
 import * as Plan from "../plan/service";
 import { implementationGraphs } from "./plan-graphs";
 import { pickBuild, queueBuild, reportBuild, restoreBuilds } from "./builds";
+import { endExport, startExport } from "./exporting";
 
 let task = {
 	id: "first",
@@ -269,4 +270,27 @@ test("a build stored before machines were recorded still restores, with no machi
 	let [restored] = restoreBuilds([legacy], "R_test");
 	expect(restored).toEqual(legacy as typeof restored);
 	expect(restored?.machineId).toBeUndefined();
+});
+
+test("a build waits while the tasks are being made into issues", async () => {
+	let { plan } = await prepared();
+	let input = {
+		planRevision: 0,
+		graphVersion: 1,
+		graphRevision: 1,
+		user: "U_test",
+		connectionId: "laptop",
+		machineId: "M_laptop",
+		repositoryId: "R_test",
+		checkout,
+	};
+	startExport(plan.id);
+	try {
+		await expect(queueBuild(plan, input)).rejects.toThrow("issues are being created");
+		expect(plan.builds).toEqual([]);
+	} finally {
+		endExport(plan.id);
+	}
+	expect((await queueBuild(plan, input)).state).toBe("queued");
+	await Plan.close(plan);
 });

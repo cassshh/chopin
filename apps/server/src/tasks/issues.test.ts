@@ -11,6 +11,7 @@ import {
 	issuesSnapshot,
 	parentIssue,
 	READ_ONLY_ISSUES,
+	RECOVERY_FAILED,
 	restoreIssues,
 	taskIssue,
 	taskMarker,
@@ -504,6 +505,49 @@ describe("exportIssues", () => {
 			// Everything is recorded now, so nobody's issues need looking for again.
 			expect(again.unresolved).toBeUndefined();
 		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("a recovery listing that fails ends the press without making anything", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			let first = fakeGitHub(call =>
+				call.kind === "create" && call.title === "Expose the export endpoint"
+					? new GitHubError("GitHub API rejected the request", 502)
+					: undefined
+			);
+			await exportIssues(exportContext(first.github), input());
+			let second = fakeGitHub();
+			await expect(exportIssues(
+				exportContext({
+					...second.github,
+					issuesBy: async () => {
+						throw new GitHubError("GitHub API rejected the request", 502);
+					},
+				}),
+				input(),
+			)).rejects.toThrow(RECOVERY_FAILED);
+			expect(second.calls).toEqual([]);
+			expect(context.plan.issues?.problem).toBe(RECOVERY_FAILED);
+			expect(context.plan.issues?.tasks.api?.issue).toBeUndefined();
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("issues are refused while a build of the tasks is under way", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			context.plan.claiming = true;
+			let { github, calls } = fakeGitHub();
+			await expect(exportIssues(exportContext(github), input())).rejects.toThrow(
+				"a build of these tasks is under way",
+			);
+			expect(context.plan.issues).toBeUndefined();
+			expect(calls).toEqual([]);
+		} finally {
+			context.plan.claiming = false;
 			await Service.close(context.plan);
 		}
 	});
