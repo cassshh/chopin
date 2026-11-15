@@ -508,12 +508,28 @@ async function run(
 				let took = assigned.some(login =>
 					copilot ? /copilot/i.test(login) : login.toLowerCase() === assignee.toLowerCase()
 				);
-				if (!took) throw new GitHubError("assignee was not added", 422);
+				if (!took) {
+					// GitHub answered without the assignee: it ignores logins it may not assign.
+					throw new GitHubError(
+						`assignee was not added (GitHub answered ${assigned.length} assignees)`,
+						422,
+					);
+				}
 				await save(issues => {
 					issues.tasks[task.id] = { ...issues.tasks[task.id], assigned: true };
 				});
 			} catch (error) {
 				if (error instanceof GitHubError && error.status === 409) throw error;
+				// Token-safe: the step, GitHub's status and our reason, never a token or a body.
+				console.error(
+					"chopin: assigning an exported issue failed",
+					JSON.stringify({
+						issue: issue.number,
+						copilot,
+						status: error instanceof GitHubError ? error.status : undefined,
+						reason: error instanceof Error ? error.message : String(error),
+					}),
+				);
 				let problem = problemFor(error, "assign");
 				await save(issues => {
 					issues.tasks[task.id] = { ...issues.tasks[task.id], problem };
