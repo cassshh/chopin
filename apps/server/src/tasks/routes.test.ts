@@ -10,6 +10,7 @@ import { CONNECTOR_PROTOCOLS, registerExperimentRoutes } from "../experiments/ro
 import { implementationGraphs } from "./plan-graphs";
 import { registerImplementationRoutes } from "./routes";
 import { queueRebuild, requestBuild } from "./builds";
+import { endExport, startExport } from "./exporting";
 import { implementationStatus } from "./notifications";
 import { buildNotices } from "./build-notices";
 import { LiveSyncCoordinator } from "./live-sync";
@@ -2445,6 +2446,23 @@ test("only the builder's own opted-in connection takes an automatic rebuild", as
 				automatic: true,
 			})).kind,
 		).toBe("queued");
+	} finally {
+		await Plan.close(context.plan);
+	}
+});
+
+test("a rebuild waits while the tasks are being made into issues", async () => {
+	let { context } = await deliveredLive();
+	try {
+		expect((await edit(context.plan, "A rebuilt paragraph.")).ok).toBe(true);
+		startExport(context.plan.id);
+		try {
+			expect((await queueRebuild(context.plan, context.experiments.connections)).kind).toBe("busy");
+			expect(context.plan.builds.filter(build => build.kind === "rebuild")).toEqual([]);
+		} finally {
+			endExport(context.plan.id);
+		}
+		expect((await queueRebuild(context.plan, context.experiments.connections)).kind).toBe("queued");
 	} finally {
 		await Plan.close(context.plan);
 	}
