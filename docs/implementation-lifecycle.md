@@ -330,7 +330,9 @@ press (Create missing issues, or Approve plan with **Also track as GitHub issues
 how many were closed. Until GitHub confirms the close, the issue stays in the export's `removed`
 list, so a refused close is tried again, and a task that comes back meanwhile takes its issue back
 instead of getting a new one. Nothing closes an issue without a press: the Planner revising the
-tasks never writes to GitHub. A task ID
+tasks never writes to GitHub. When every task already has its issue but the export is for older
+tasks (one removed, a dependency added) or stopped short (a close GitHub refused), the card offers
+**Update issues**, which presses at once, with no assignees to pick. A task ID
 longer than 128 characters, or `__proto__`, is refused before anything is kept, and a revised
 task keeps only the blocked-by links of its current dependencies. Issues already made for a task keep their link when the graph is revised and the
 task keeps its ID; edits to the task do not reach its issue, and a removed task's issue is closed
