@@ -1122,6 +1122,10 @@ describe("build status", () => {
 		let stale = snapshot({ planRevision: 5 });
 		expect(look(stale).kind).toBe("plan");
 		expect(buildTabReady(stale, look(stale))).toBe(true);
+		// A blocker raised during review holds approval, not reading the tasks.
+		let blocked = snapshot({ blockers: ["accepted comments awaiting plan changes"] });
+		expect(look(blocked).kind).toBe("plan");
+		expect(buildTabReady(blocked, look(blocked))).toBe(true);
 		let pressed = { stage: "drafting", sent: false } as const;
 		expect(buildTabReady(snapshot(), look(snapshot(), { state: pressed }))).toBe(true);
 		let returned = snapshot({
