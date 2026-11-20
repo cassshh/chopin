@@ -19,3 +19,40 @@ test("RESEARCH_EVIDENCE_TIMEOUT_MS rejects out-of-range and malformed values", (
 		);
 	}
 });
+
+test("web search stays on GitHub's tool unless Gemini is chosen", () => {
+	expect(configured().webSearch).toEqual({ provider: "copilot" });
+	expect(configured({ GEMINI_API_KEY: "key" }).webSearch).toEqual({ provider: "copilot" });
+	expect(configured({ WEB_SEARCH_PROVIDER: "copilot" }).webSearch).toEqual({ provider: "copilot" });
+});
+
+test("WEB_SEARCH_PROVIDER=gemini searches on GEMINI_API_KEY with the chosen model", () => {
+	expect(configured({ WEB_SEARCH_PROVIDER: "gemini", GEMINI_API_KEY: "key" }).webSearch).toEqual({
+		provider: "gemini",
+		apiKey: "key",
+		model: "gemini-3.8-flash",
+	});
+	expect(
+		configured({
+			WEB_SEARCH_PROVIDER: "gemini",
+			GEMINI_API_KEY: "key",
+			WEB_SEARCH_MODEL: "gemini-3.8-pro",
+		}).webSearch,
+	).toMatchObject({ model: "gemini-3.8-pro" });
+});
+
+test("a Gemini web search without its key, an unknown provider or a malformed model is refused", () => {
+	expect(() => configured({ WEB_SEARCH_PROVIDER: "gemini" })).toThrow(
+		"WEB_SEARCH_PROVIDER=gemini needs GEMINI_API_KEY",
+	);
+	expect(() => configured({ WEB_SEARCH_PROVIDER: "bing" })).toThrow(
+		"WEB_SEARCH_PROVIDER must be copilot or gemini",
+	);
+	expect(() =>
+		configured({
+			WEB_SEARCH_PROVIDER: "gemini",
+			GEMINI_API_KEY: "key",
+			WEB_SEARCH_MODEL: "../models/x",
+		})
+	).toThrow("WEB_SEARCH_MODEL must be a Gemini model name");
+});
