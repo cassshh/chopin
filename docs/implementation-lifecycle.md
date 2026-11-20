@@ -308,17 +308,19 @@ recorded). Before it makes anything, the next press lists each of those presser'
 their press and takes back, by its marker, any issue made but never recorded (its answer lost, or
 its save failed), so it is not made a second time, whoever presses again. Only those people's
 issues are looked at, so a marker someone else writes into an issue is never taken. A listing that
-fails ends the press with nothing made, since it can't tell whether the issue exists. An export is
+fails, or that GitHub cuts short (more than 10 pages of 100), ends the press with nothing made, since it can't tell whether the issue exists. An export is
 refused while a build of the tasks is queued or running, and a build, a rebuild or a coding agent's
 claim waits while an export runs, so no build reads half-made issue links.
 
 A task removed from the graph since the last export has its issue closed as not planned by the next
 press (Create missing issues, or Approve plan with **Also track as GitHub issues**), and Chat says
 how many were closed. Until GitHub confirms the close, the issue stays in the export's `removed`
-list, so a refused close is tried again, and a task that comes back meanwhile takes its issue back
-instead of getting a new one. Nothing closes an issue without a press: the Planner revising the
+list (at most 500; a press that would exceed it is refused rather than forget one), so a refused
+close is tried again, and a task that comes back meanwhile takes its issue back instead of getting a
+new one. Nothing closes an issue without a press: the Planner revising the
 tasks never writes to GitHub. When every task already has its issue but the export is for older
-tasks (one removed, a dependency added) or stopped short (a close GitHub refused), the card offers
+tasks (one removed, a dependency added) or stopped short (a close GitHub refused, or sub-issue and
+blocked-by links an interrupted press left unmade, which the snapshot reports as `pending`), the card offers
 **Update issues**, which presses at once, with no assignees to pick. A task ID
 longer than 128 characters, or `__proto__`, is refused before anything is kept, and a revised
 task keeps only the blocked-by links of its current dependencies. Issues already made for a task keep their link when the graph is revised and the
