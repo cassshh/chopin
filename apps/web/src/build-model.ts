@@ -410,10 +410,11 @@ export function buildPhase(snapshot: Snapshot | undefined): BuildPhase {
 	let graph = snapshot.graph;
 	if (!graph) return { kind: "drafting", draft: "prepare" };
 	if (graph.planRevision !== snapshot.planRevision) return { kind: "drafting", draft: "revise" };
+	// Queuing a build approves its tasks first, so a draft is newer than any build or run that ended:
+	// it waits for review. Only tasks a build approved can be returned for changes or retried.
+	if (graph.state === "draft") return { kind: "review" };
 	if (run?.outcome.kind === "revision_requested") return { kind: "drafting", draft: "returned" };
-	// Queuing a build approves its tasks first, so a draft is newer than any build that ended: it
-	// waits for review, and only the tasks that build approved are its to retry.
-	if (ended && graph.state !== "draft") return { kind: "failed" };
+	if (ended) return { kind: "failed" };
 	return { kind: "review" };
 }
 

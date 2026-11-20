@@ -201,13 +201,20 @@ describe("buildPhase", () => {
 			kind: "drafting",
 			draft: "revise",
 		});
-		expect(buildPhase(snapshot({
+		let returned = {
 			build: build("stopped"),
 			lifecycle: {
-				execution: { state: "idle" },
+				execution: { state: "idle" as const },
 				history: [run({ kind: "revision_requested", reason: "Split it" })],
 			},
-		}))).toEqual({ kind: "drafting", draft: "returned" });
+		};
+		let approved = { ...snapshot().graph!, state: "approved" as const };
+		expect(buildPhase(snapshot({ ...returned, graph: approved }))).toEqual({
+			kind: "drafting",
+			draft: "returned",
+		});
+		// Build plan drafted the returned tasks again: the new draft waits for review.
+		expect(buildPhase(snapshot(returned))).toEqual({ kind: "review" });
 	});
 
 	it("names each blocker before drafting", () => {
@@ -1147,6 +1154,7 @@ describe("build status", () => {
 		let pressed = { stage: "drafting", sent: false } as const;
 		expect(buildTabReady(snapshot(), look(snapshot(), { state: pressed }))).toBe(true);
 		let returned = snapshot({
+			graph: { ...snapshot().graph!, state: "approved" },
 			build: build("stopped"),
 			lifecycle: {
 				execution: { state: "idle" },
