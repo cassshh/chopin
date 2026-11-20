@@ -33,7 +33,7 @@ function answers(id: string, scores: Scores): Record<string, JevAnswer> {
 	let intents = ["confused", "disagree", "approve", "ack", "more", "none"];
 	let rest = (1 - scores.probability) / (intents.length - 1);
 	return {
-		[`intent:${id}`]: {
+		[`intent_${id}`]: {
 			type: "choice",
 			choice: scores.intent,
 			confidence: scores.confidence,
@@ -48,8 +48,8 @@ function classifier(scores: Scores | ((id: string) => Scores)) {
 	let requests: JevRequest[] = [];
 	let decide = async (request: JevRequest): Promise<JevResult> => {
 		requests.push(request);
-		let ids = Object.keys(request.questions).filter(key => key.startsWith("intent:")).map(key =>
-			key.slice("intent:".length)
+		let ids = Object.keys(request.questions).filter(key => key.startsWith("intent_")).map(key =>
+			key.slice("intent_".length)
 		);
 		return {
 			model: "fake/classifier",
@@ -98,8 +98,8 @@ describe("reading any other emoji", () => {
 		await classify([item("r0", "🤔"), item("r1", "🔍")], { decide });
 		expect(requests).toHaveLength(1);
 		let { questions } = requests[0]!;
-		expect(Object.keys(questions)).toEqual(["intent:r0", "intent:r1"]);
-		let choice = questions["intent:r0"]!;
+		expect(Object.keys(questions)).toEqual(["intent_r0", "intent_r1"]);
+		let choice = questions["intent_r0"]!;
 		expect(choice.type).toBe("choice");
 		expect(Object.keys((choice as { criteria: object }).criteria)).toEqual([
 			"confused",
@@ -189,7 +189,7 @@ describe("reading any other emoji", () => {
 });
 
 describe("routing by the Choice's probability and confidence", () => {
-	let reading = (scores: Scores) => read(answers("x", scores)["intent:x"]);
+	let reading = (scores: Scores) => read(answers("x", scores)["intent_x"]);
 
 	it("replies when a kind that asks for one is likely and confident enough", () => {
 		expect(reading(CLEAR)).toMatchObject({ intent: "confused", reply: true });

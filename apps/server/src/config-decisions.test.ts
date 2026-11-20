@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import { describe as description } from "./config";
 import { configured } from "./config-conversation.test-fixtures";
 
-let none = { JEV_API_KEY: undefined, TYPESAFE_API_KEY: undefined, OPENAI_API_KEY: undefined };
+let none = {
+	JEV_API_KEY: undefined,
+	TYPESAFE_API_KEY: undefined,
+	OPENAI_API_KEY: undefined,
+	GEMINI_API_KEY: undefined,
+};
 
 test("an unset DECISIONS_MODEL follows whichever provider key is present", () => {
 	expect(configured({ ...none, JEV_API_KEY: "jev" }).decisionsModel).toBe("typesafe/jev-latest");
@@ -13,6 +18,10 @@ test("an unset DECISIONS_MODEL follows whichever provider key is present", () =>
 		.toBe("openai-decisions/gpt-6-luna");
 	expect(configured({ ...none, JEV_API_KEY: "jev", OPENAI_API_KEY: "openai" }).decisionsModel)
 		.toBe("typesafe/jev-latest");
+	expect(configured({ ...none, GEMINI_API_KEY: "gemini" }).decisionsModel)
+		.toBe("google-decisions/gemini-decision-1");
+	expect(configured({ ...none, OPENAI_API_KEY: "openai", GEMINI_API_KEY: "gemini" }).decisionsModel)
+		.toBe("openai-decisions/gpt-6-luna");
 	expect(configured({ ...none, AGENT: "off" }).decisionsModel).toBeUndefined();
 });
 
@@ -20,6 +29,7 @@ test("DECISIONS_MODEL names any classifier exactly", () => {
 	for (
 		let model of [
 			"openai-decisions/gpt-6-luna",
+			"google-decisions/gemini-decision-1",
 			"cloudflare-workers-ai/@cf/cloudflare/clef",
 			"acme-labs/decider-2",
 		]
@@ -45,7 +55,8 @@ test("the Planner and decision features need a decisions model, and the error na
 	) {
 		expect(() => configured({ ...none, ...overrides })).toThrow(
 			`A decisions model is required when ${reason}. Set OPENAI_API_KEY for OpenAI's `
-				+ "Decisions API, JEV_API_KEY for TypeSafe's Jev, or DECISIONS_MODEL",
+				+ "Decisions API, JEV_API_KEY for TypeSafe's Jev, GEMINI_API_KEY for Gemini Decisions, "
+				+ "or DECISIONS_MODEL",
 		);
 	}
 	expect(configured({ ...none, OPENAI_API_KEY: "openai", CONVERSATION_PLAN: "on" }))

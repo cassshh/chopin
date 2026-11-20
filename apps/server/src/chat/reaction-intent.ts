@@ -233,12 +233,12 @@ export async function classify(
 			let result = await options.decide({
 				state: { items: batch.map(({ state }) => state) },
 				questions: Object.fromEntries(batch.map(({ item }) => [
-					`intent:${item.id}`,
+					`intent_${item.id}`,
 					intentQuestion(item.id),
 				])),
 			}, { signal: options.signal });
 			for (let { item } of batch) {
-				readings.set(item.id, read(result.answers[`intent:${item.id}`]));
+				readings.set(item.id, read(result.answers[`intent_${item.id}`]));
 			}
 		} catch (error) {
 			// A provider's message can quote what was sent, so only the reason and the sizes are kept.
