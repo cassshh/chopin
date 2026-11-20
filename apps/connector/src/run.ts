@@ -18,7 +18,13 @@ import {
 import type { GitHubGrantRequest, RunAiLaunch } from "./machine";
 import { endMachineAiLaunch, machineAiLaunch, NoAiAccount } from "./machine";
 import { type AiRelay, type RelayedLaunch, startAiRelay } from "./ai-relay";
-import { agentAiEnvironment, managedEnvironment } from "./ai-agent";
+import {
+	agentAiEnvironment,
+	chooseCopilotModel,
+	copilotAgent,
+	type CopilotModel,
+	managedEnvironment,
+} from "./ai-agent";
 import { type McpTokenFile, mcpTokenFile } from "./mcp-token";
 import { AgentTimedOut, runAgent, timedOut } from "./acp";
 import type { AgentInfo } from "./acp";
@@ -99,6 +105,45 @@ type Options = {
 /** Chopin could not give a run its AI launch: the run starts no agent, and its end says why. */
 class AiLaunchFailed extends Error {
 	override name = "AiLaunchFailed";
+}
+
+/**
+ * The Copilot model a Copilot CLI agent runs on, from Copilot's model list asked through the relay
+ * with the launch's stand-in: the owner's `COPILOT_MODEL` when Copilot offers it, else Copilot's
+ * default. Copilot CLI with a custom provider has no model of its own, so a list that can't be read
+ * or offers none starts no agent.
+ */
+async function copilotModelFor(
+	baseUrl: string,
+	placeholder: string,
+	preferred: string | undefined,
+	signal: AbortSignal,
+): Promise<CopilotModel> {
+	let list: unknown;
+	try {
+		let response = await fetch(`${baseUrl}/models`, {
+			headers: { authorization: `Bearer ${placeholder}`, "copilot-integration-id": "vscode-chat" },
+			signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+		});
+		if (!response.ok) {
+			await response.body?.cancel().catch(() => {});
+			throw new Error(`Copilot answered ${response.status}`);
+		}
+		list = await response.json();
+	} catch (error) {
+		if (signal.aborted) throw error;
+		throw new AiLaunchFailed(
+			"Chopin couldn't list this run's Copilot models for Copilot CLI. Start it again in a moment.",
+			{ cause: error },
+		);
+	}
+	let model = chooseCopilotModel(list, preferred);
+	if (!model) {
+		throw new AiLaunchFailed(
+			"Copilot offers this run no chat model Copilot CLI can use, so it didn't start.",
+		);
+	}
+	return model;
 }
 
 /** How long the end of a run's AI launch may take before it is left to its deadline. */
@@ -392,11 +437,23 @@ export async function runWork(
 			agentHome = agentFolder(path);
 			await rm(agentHome, { recursive: true, force: true });
 			await mkdir(agentHome, { recursive: true, mode: 0o700 });
+			let copilot = launched.providers.find(grant => grant.provider === "github-copilot");
+			let copilotUrl = relayed.baseUrls["github-copilot"];
+			let copilotModel: CopilotModel | undefined;
+			if (copilotAgent(options.command) && copilot && copilotUrl) {
+				copilotModel = await copilotModelFor(
+					copilotUrl,
+					copilot.placeholder,
+					options.env?.COPILOT_MODEL,
+					abort.signal,
+				);
+			}
 			agentAi = agentAiEnvironment({
 				command: options.command,
 				home: agentHome,
 				providers: launched.providers,
 				relayed,
+				...(copilotModel ? { copilotModel } : {}),
 			});
 			if (options.agentStore) {
 				keepSessionsIn(options.agentStore, agentAi.ATOMIC_CODING_AGENT_DIR!, options.output);
