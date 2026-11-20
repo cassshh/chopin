@@ -29,6 +29,7 @@
 		"verify:agents": "bun scripts/verify-agents.ts"
 	},
 	"devDependencies": {
+		"@bastani/atomic-telemetry": "link:../atomic/packages/telemetry",
 		"@axe-core/playwright": "4.13.0",
 		"@babel/parser": "7.29.7",
 		"@playwright/test": "1.62.1",
@@ -43,6 +44,7 @@
 		"yaml": "2.9.0"
 	},
 	"overrides": {
+		"@bastani/atomic-ai": "link:../atomic/packages/ai",
 		"bun-types": "1.4.4"
 	},
 	"patchedDependencies": {
