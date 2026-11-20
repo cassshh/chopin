@@ -139,6 +139,8 @@ export type IssueExportSnapshot = {
 	current: boolean;
 	/** Issues are being created now. */
 	running: boolean;
+	/** An issue still waits for its sub-issue or blocked-by link: a press again finishes them. */
+	pending?: true;
 	parent?: { number: number; url: string };
 	/** Why creating the parent issue failed, which stops every task's. */
 	problem?: string;

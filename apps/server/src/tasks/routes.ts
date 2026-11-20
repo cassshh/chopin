@@ -11,7 +11,7 @@ import {
 import { implementationLifecycle } from "./lifecycle";
 import { planSourceFor } from "./plan-source";
 import { planningReadiness, reportImplementationLifecycle } from "./plan-graphs";
-import { assigneesSchema, exporting, exportIssues, issuesSnapshot } from "./issues";
+import { assigneesSchema, exporting, exportIssues, issuesSnapshot, pendingLinks } from "./issues";
 import { exclusive } from "../plan/service";
 import { GitHubError } from "../github/client";
 import type { GitHubReferenceSource } from "../github/client";
@@ -645,10 +645,12 @@ export function registerImplementationRoutes(router: Router, auth: HostedAuth, o
 						: {}),
 				},
 			}, { ...input, by: session.user.login });
+			let built = await options.withPlan(id, async plan => plan.graph?.versions.at(-1));
 			return json({
 				...(result.parent
 					? { parent: { number: result.parent.number, url: result.parent.url } }
 					: {}),
+				...(built && pendingLinks(result, built.definition.tasks) ? { pending: true } : {}),
 				tasks: Object.fromEntries(
 					Object.entries(result.tasks).map(([task, entry]) => [task, {
 						...(entry.issue ? { number: entry.issue.number, url: entry.issue.url } : {}),
