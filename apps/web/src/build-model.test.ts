@@ -236,11 +236,26 @@ describe("buildPhase", () => {
 	});
 
 	it("separates a failure before the claim from a stop while the run holds the tasks", () => {
-		expect(buildPhase(snapshot({ build: build("failed") }))).toEqual({ kind: "failed" });
+		let approved = { ...snapshot().graph!, state: "approved" as const };
+		expect(buildPhase(snapshot({ build: build("failed"), graph: approved }))).toEqual({
+			kind: "failed",
+		});
 		expect(buildPhase(snapshot({
 			build: build("stopped"),
 			lifecycle: { execution: { state: "active" }, history: [] },
 		}))).toEqual({ kind: "stopped" });
+	});
+
+	it("reads tasks drafted again after a build that ended as ready for review, not as its retry", () => {
+		for (let state of ["failed", "stopped"] as const) {
+			expect(buildPhase(snapshot({ build: build(state) }))).toEqual({ kind: "review" });
+		}
+		// Build plan's fresh draft waits for Approve plan; it never starts the ended build again.
+		let draft = { stage: "drafting", sent: true } as const;
+		expect(firstBuildStep(snapshot({ build: build("failed") }), draft)).toEqual({
+			view: "idle",
+			next: "reset",
+		});
 	});
 
 	it("counts distinct pull requests when done", () => {
@@ -358,7 +373,9 @@ describe("first build", () => {
 
 	it("retries a build that failed before it claimed its tasks from the same tasks", () => {
 		let state = advanceFirstBuild(idle, { type: "press" });
-		expect(firstBuildStep(snapshot({ build: build("failed") }), state).next).toBe("start");
+		let approved = { ...snapshot().graph!, state: "approved" as const };
+		expect(firstBuildStep(snapshot({ build: build("failed"), graph: approved }), state).next)
+			.toBe("start");
 	});
 
 	it("drafts for review, then Approve plan starts the drafted tasks", () => {
@@ -969,10 +986,11 @@ describe("build status", () => {
 		);
 		expect(early).toEqual({ kind: "building", done: 0, total: 1, tip: "0 of 1 tasks built" });
 		expect(buildLabel(early)).toBe("Building 0 of 1");
-		let failed = look(snapshot({ build: build("failed") }));
+		let approved = { ...snapshot().graph!, state: "approved" as const };
+		let failed = look(snapshot({ build: build("failed"), graph: approved }));
 		expect(failed).toMatchObject({ kind: "stopped", retry: true });
 		expect(buildLabel(failed)).toBe("Build stopped");
-		expect(look(snapshot({ build: build("failed") }), { canEdit: false }))
+		expect(look(snapshot({ build: build("failed"), graph: approved }), { canEdit: false }))
 			.toMatchObject({ retry: false });
 		// Nothing ran, so a press that found no local agent never reads as stopped.
 		let noAgent = look(snapshot(), { state: { stage: "failed", agent: true } });
