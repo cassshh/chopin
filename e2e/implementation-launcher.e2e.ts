@@ -1122,7 +1122,7 @@ test("a build for someone with no AI account chopin can use never starts its age
 		await page.getByRole("button", { name: "Add machine", exact: true }).click();
 		await expect(page.getByRole("status").filter({ hasText: "Connected" })).toHaveText("Connected");
 		await page.goto(testChannelPath(room));
-		await page.getByRole("button", { name: "Build plan", exact: true }).click();
+		await page.getByRole("button", { name: "Approve plan", exact: true }).click();
 		let words =
 			"chopin needs an AI account to run this, so it didn't start. Add one, then start it again.";
 		await expect.poll(
