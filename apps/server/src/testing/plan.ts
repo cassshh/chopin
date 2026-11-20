@@ -31,6 +31,8 @@ export type SeedState = {
 	workflowRuns?: unknown[];
 	/** Every stored stage of those runs, by run id, in run order. */
 	runStages?: Record<string, import("../storage/model").RunStageRecord[]>;
+	/** The GitHub issues the tasks were exported as. */
+	issues?: import("../tasks/issues").IssueExport;
 };
 
 export function storedQuestion(definition: Definition): number[] {

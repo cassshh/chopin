@@ -13,6 +13,7 @@ import {
 	transition,
 } from "./lifecycle";
 import { announceImplementation } from "./notifications";
+import { exporting } from "./exporting";
 import { planSourceFor, planSourceSchema } from "./plan-source";
 import { endedReason } from "./build-ending";
 import { drain, exclusive, persistExclusive, source } from "../plan/service";
@@ -288,6 +289,8 @@ export async function queueBuild(plan: Plan, input: BuildInput): Promise<BuildRe
 				plan.execution
 				|| plan.builds.some(build => ["queued", "starting", "running"].includes(build.state))
 			) throw new Error("implementation is already active");
+			// Issues being made for these tasks: the build waits until their links are all there.
+			if (exporting(plan.id)) throw new Error("issues are being created for these tasks");
 			let ready = await planningReadiness(plan, input.planRevision);
 			if (!ready.ok) throw new Error(ready.blockers.join(", "));
 			let id = crypto.randomUUID();
@@ -398,7 +401,8 @@ export async function queueRebuild(
 		let live = plan.live;
 		if (!live) return { kind: "unavailable" };
 		if (options.automatic && stoppedForRevision(plan)) return { kind: "unavailable" };
-		if (buildActive(plan)) return { kind: "busy" };
+		// Issues being made for these tasks: a rebuild would revise the tasks under the export.
+		if (buildActive(plan) || exporting(plan.id)) return { kind: "busy" };
 		if (source(plan) === live.baseSource) return { kind: "unchanged" };
 		{
 			let ready = await planningReadiness(plan, plan.revision);

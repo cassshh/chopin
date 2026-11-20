@@ -36,6 +36,32 @@ function installation(id = 123) {
 }
 
 describe("the GitHub client", () => {
+	it("lists a person's issues across pages, and fails rather than return a list cut short", async () => {
+		let pages = (last: number, repeat?: number) =>
+			new GitHubClient({
+				fetch: async input => {
+					let page = Number(new URL(String(input)).searchParams.get("page"));
+					let next = repeat ?? page + 1;
+					return Response.json([{
+						id: page,
+						number: page,
+						html_url: `https://g/${page}`,
+						body: "",
+					}], {
+						headers: page < last
+							? { link: `<https://api.test/repos/o/r/issues?page=${next}>; rel="next"` }
+							: {},
+					});
+				},
+				endpoints: { api: "https://api.test" },
+			});
+		let query = { creator: "ana", since: "2026-11-20T00:00:00Z" };
+		expect((await pages(3).issuesBy("ghu", "o", "r", query)).map(issue => issue.number))
+			.toEqual([1, 2, 3]);
+		await expect(pages(11).issuesBy("ghu", "o", "r", query)).rejects.toThrow(GitHubError);
+		await expect(pages(5, 1).issuesBy("ghu", "o", "r", query)).rejects.toThrow(GitHubError);
+	});
+
 	it("lists a repository's files from the tree of a branch, the files only, as many as it has", async () => {
 		let called: string[] = [];
 		let client = new GitHubClient({

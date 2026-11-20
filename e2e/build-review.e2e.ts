@@ -41,14 +41,14 @@ test("drafted tasks wait for review, and only Approve plan starts them", async (
 		}
 	});
 
-	// The slot asks for approval instead of building, and Build is open to read the tasks.
-	let approve = page.getByRole("button", { name: "Approve plan", exact: true });
-	await expect(approve).toBeVisible();
+	// The slot asks for a review instead of building, and Build is open to read the tasks.
+	let review = page.getByRole("button", { name: "Review plan", exact: true });
+	await expect(review).toBeVisible();
 	await expect(page.getByRole("button", { name: "Build plan", exact: true })).toHaveCount(0);
 	let tab = page.getByRole("group", { name: "Document view" })
 		.getByRole("button", { name: "Build", exact: true });
 	await expect(tab).toBeEnabled();
-	await tab.click();
+	await review.click();
 	let view = page.getByRole("region", { name: "Build", exact: true });
 	await expect(view.getByText("Ready for review", { exact: true })).toBeVisible();
 	await expect(view.getByText("2 tasks", { exact: true })).toBeVisible();
@@ -66,12 +66,12 @@ test("drafted tasks wait for review, and only Approve plan starts them", async (
 test("an edit before approval puts the tasks out of date, so Build plan drafts them again", async ({ seed, join: enter }) => {
 	await seed("# Export\n\nPeople can export a document.\n", { graph: drafted() });
 	let page = await enter(`ana-${crypto.randomUUID().slice(0, 8)}`);
-	await expect(page.getByRole("button", { name: "Approve plan", exact: true })).toBeVisible();
+	await expect(page.getByRole("button", { name: "Review plan", exact: true })).toBeVisible();
 	await content(page).click();
 	await page.keyboard.press("End");
 	await page.keyboard.type(" As CSV.");
 	await expect(page.getByRole("button", { name: "Build plan", exact: true })).toBeVisible();
-	await expect(page.getByRole("button", { name: "Approve plan", exact: true })).toHaveCount(0);
+	await expect(page.getByRole("button", { name: "Review plan", exact: true })).toHaveCount(0);
 	// The out-of-date tasks stay one tab away, with why they are greyed and what brings them back.
 	await page.getByRole("group", { name: "Document view" })
 		.getByRole("button", { name: "Build", exact: true })

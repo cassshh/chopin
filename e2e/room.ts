@@ -170,3 +170,14 @@ export async function written(page: Page, room: string, text: string | RegExp): 
 		.poll(() => readSource(port(page.url()), room), { timeout: 15_000 })
 		.toMatch(text);
 }
+
+/**
+ * Approve drafted tasks the way a writer does: the header's Review plan opens Build, whose card
+ * holds Approve plan.
+ */
+export async function approvePlan(page: Page): Promise<void> {
+	await page.getByRole("button", { name: "Review plan", exact: true }).click();
+	await page.getByRole("region", { name: "Build", exact: true })
+		.getByRole("button", { name: "Approve plan", exact: true })
+		.click();
+}

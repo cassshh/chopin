@@ -53,9 +53,11 @@ export const INITIAL_JAVASCRIPT_BUDGET: JavaScriptBudget = {
 // stylesheet loaded with the first copied element, the initial stylesheet measures 183,416 B raw
 // and 32,543 B gzip in the container build (184,180 B raw and 32,623 B gzip locally); allow about
 // 800 B raw and 375 B gzip above the local build so any leaked copy (~93.6 KB raw / ~12.0 KB gzip) fails.
+// The Build tab's issue pills, with GitHub's issue and pull request glyphs, add about 160 B raw;
+// allow 300 B raw.
 export const INITIAL_STYLESHEET_BUDGET: StylesheetBudget = {
 	gzip: 33_000,
-	raw: 185_000,
+	raw: 185_300,
 };
 
 export function enforceInitialJavaScript(

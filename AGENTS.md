@@ -732,9 +732,10 @@ its lock; building never answers or closes one.
 A person's press is the approval, in two steps for a first build: **Build plan**
 asks the Planner for tasks and stops; the drafted graph waits in the Build tab
 for review, still a draft (invisible and unclaimable to MCP), and an edit to the
-document makes it stale. **Approve plan** approves exactly the reviewed draft and
-starts it through the same `POST /api/channels/:id/implementation` that queues a
-build. Once a build has delivered, with or without `LIVE_BUILD`, a
+document makes it stale. The header then reads **Review plan**, which opens Build;
+there **Approve plan** approves exactly the reviewed draft and starts it through the
+same `POST /api/channels/:id/implementation` that queues a build, after making the
+tasks GitHub issues when **Also track as GitHub issues** is ticked. Once a build has delivered, with or without `LIVE_BUILD`, a
 rebuild appends its tasks as an approved, completed graph version from the
 coding agent's report, with no separate review: without `LIVE_BUILD` that
 approval is the person pressing **Build** (or **Retry**) on the changes, which

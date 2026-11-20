@@ -21,6 +21,7 @@ import { claimImplementation, reportImplementationLifecycle } from "../tasks/pla
 import { StorageError } from "../storage/errors";
 import { implementationLifecycle } from "../tasks/lifecycle";
 import { unapprovedContext } from "../tasks/open-decisions";
+import { issueLinks } from "../tasks/issues";
 import { planSourceFor, withPlanSource } from "../tasks/plan-source";
 import { imagePath } from "../images/format";
 import { IdempotentInvocations, invocationFingerprint } from "./invoke";
@@ -189,6 +190,7 @@ function exposed(
 		activity: lifecycle?.activity,
 		history: lifecycle?.history ?? [],
 		...unapprovedContext(state.records ?? []),
+		...issueLinks(state),
 		...withSource(planSourceFor(state.planSources ?? [], version.planRevision)),
 	};
 }
@@ -1021,6 +1023,7 @@ export function hosted(
 									...(live.execution ? { execution: live.execution } : {}),
 									lifecycle: live.lifecycle,
 									planSources: live.planSources,
+									...(live.issues ? { issues: live.issues } : {}),
 								}));
 						}
 						let stored = await auth.storage.collaboration.load(channel.id, auth.clock());

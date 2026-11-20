@@ -10,6 +10,7 @@ import { CONNECTOR_PROTOCOLS, registerExperimentRoutes } from "../experiments/ro
 import { implementationGraphs } from "./plan-graphs";
 import { registerImplementationRoutes } from "./routes";
 import { queueRebuild, requestBuild } from "./builds";
+import { endExport, startExport } from "./exporting";
 import { implementationStatus } from "./notifications";
 import { buildNotices } from "./build-notices";
 import { LiveSyncCoordinator } from "./live-sync";
@@ -2450,6 +2451,23 @@ test("only the builder's own opted-in connection takes an automatic rebuild", as
 	}
 });
 
+test("a rebuild waits while the tasks are being made into issues", async () => {
+	let { context } = await deliveredLive();
+	try {
+		expect((await edit(context.plan, "A rebuilt paragraph.")).ok).toBe(true);
+		startExport(context.plan.id);
+		try {
+			expect((await queueRebuild(context.plan, context.experiments.connections)).kind).toBe("busy");
+			expect(context.plan.builds.filter(build => build.kind === "rebuild")).toEqual([]);
+		} finally {
+			endExport(context.plan.id);
+		}
+		expect((await queueRebuild(context.plan, context.experiments.connections)).kind).toBe("queued");
+	} finally {
+		await Plan.close(context.plan);
+	}
+});
+
 test("pairing records automatic-work consent, off unless asked for", async () => {
 	let context = await setup();
 	try {
@@ -3814,6 +3832,115 @@ test("a rebuild keeps its base unless the plan's files were pushed for a revisio
 			commit: newer.commit,
 		});
 		expect(moved.build.planSource).toEqual(newer);
+	} finally {
+		await Plan.close(context.plan);
+	}
+});
+
+test("Create issues makes a parent and a sub-issue per task as the presser, and shows them", async () => {
+	let context = await setup();
+	try {
+		let created: Array<{ token: string; owner: string; title: string }> = [];
+		let assigned: unknown[] = [];
+		Object.assign(context.auth.github, {
+			async createIssue(token: string, owner: string, _name: string, input: { title: string }) {
+				created.push({ token, owner, title: input.title });
+				let number = created.length;
+				return {
+					id: 500 + number,
+					number,
+					url: `https://github.com/owner/repository/issues/${number}`,
+				};
+			},
+			async addSubIssue() {},
+			async addBlockedBy() {},
+			async addAssignees(
+				_token: string,
+				_owner: string,
+				_name: string,
+				_issue: number,
+				input: { assignees: string[] },
+			) {
+				assigned.push(input);
+				return input.assignees;
+			},
+		});
+		let graph = context.plan.graph!.versions.at(-1)!;
+		let response = await context.call(`${context.path}/issues`, {
+			graphNumber: graph.number,
+			graphRevision: graph.revision,
+			assignees: { first: "other" },
+		});
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			parent: { number: 1, url: "https://github.com/owner/repository/issues/1" },
+			tasks: { first: { number: 2, url: "https://github.com/owner/repository/issues/2" } },
+		});
+		expect(created).toEqual([
+			{ token: "test", owner: "owner", title: "Test plan" },
+			{ token: "test", owner: "owner", title: "First" },
+		]);
+		expect(assigned).toEqual([{ assignees: ["other"] }]);
+		let snapshot = await (await context.call(context.path)).json();
+		expect(snapshot.issues).toMatchObject({
+			by: "test",
+			current: true,
+			running: false,
+			parent: { number: 1 },
+			tasks: { first: { number: 2, assignee: "other", assigned: true } },
+		});
+		// Pressing again creates nothing new.
+		expect(
+			(await context.call(`${context.path}/issues`, {
+				graphNumber: graph.number,
+				graphRevision: graph.revision,
+				assignees: {},
+			})).status,
+		).toBe(200);
+		expect(created).toHaveLength(2);
+	} finally {
+		await Plan.close(context.plan);
+	}
+});
+
+test("Create issues refuses readers, another origin, unknown tasks and a server that can't write issues", async () => {
+	let context = await setup();
+	try {
+		let graph = context.plan.graph!.versions.at(-1)!;
+		let request = { graphNumber: graph.number, graphRevision: graph.revision, assignees: {} };
+		let path = `${context.path}/issues`;
+		// The test GitHub has no issue methods yet.
+		expect((await context.call(path, request)).status).toBe(501);
+		Object.assign(context.auth.github, {
+			async createIssue() {
+				throw new Error("not called");
+			},
+			async addSubIssue() {},
+			async addBlockedBy() {},
+			async addAssignees() {
+				return [];
+			},
+		});
+		let readonly = await context.auth.sessions.issue("U_test", {
+			accessToken: "readonly",
+			accessExpiresIn: 28_800,
+			refreshToken: "refresh",
+			refreshExpiresIn: 15_897_600,
+		});
+		expect((await context.call(path, request, undefined, undefined, readonly.cookie)).status).toBe(
+			403,
+		);
+		expect((await context.call(path, request, undefined, "https://elsewhere.test")).status).toBe(
+			403,
+		);
+		expect((await context.call(path, { ...request, assignees: { unknown: null } })).status).toBe(
+			409,
+		);
+		expect((await context.call(path, { ...request, assignees: { first: "not a login" } })).status)
+			.toBe(400);
+		expect((await context.call(path, { ...request, graphRevision: graph.revision + 1 })).status)
+			.toBe(409);
+		expect(context.plan.issues).toBeUndefined();
 	} finally {
 		await Plan.close(context.plan);
 	}

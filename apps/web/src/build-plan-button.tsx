@@ -354,7 +354,7 @@ export function BuildGlyph(
 		? <LoaderIcon aria-hidden="true" className="build-glyph-spin" />
 		: look.kind === "building"
 		? <ProgressRingIcon progress={look.done / look.total} />
-		: look.kind === "built"
+		: look.kind === "built" || look.kind === "issued"
 		? <span className="build-glyph-dot" data-tone="success" />
 		: look.kind === "stale"
 		? look.live
@@ -553,12 +553,14 @@ export function BuildPlanButton(
 	}
 	if (look.kind === "plan" || look.kind === "review") {
 		if (!canEdit) return null;
+		// Drafted tasks: the slot opens Build, where Approve plan and Create issues sit side by side,
+		// so neither is missed. Reading them is never blocked; Build says what holds approval.
 		let reviewing = look.kind === "review";
 		let name = buildLabel(look);
-		let blocked = look.blocked;
+		let blocked = reviewing ? undefined : look.blocked;
 		// The chosen machine is offline: dimmed, still focusable, with the reason only in its
 		// accessible description. Pressing it does nothing, not even the Planner's draft.
-		let offline = blocked ? undefined : machineOffline;
+		let offline = blocked || reviewing ? undefined : machineOffline;
 		let tip = blocked ?? (look.kind === "review" && !offline ? look.tip : undefined);
 		return (
 			<>
@@ -579,7 +581,7 @@ export function BuildPlanButton(
 						}
 						if (offline) return;
 						pressed.current = true;
-						if (reviewing) build.approve();
+						if (reviewing) onOpen();
 						else {
 							reviewWanted.current = true;
 							build.press();
@@ -605,6 +607,9 @@ export function BuildPlanButton(
 		: look.kind === "stale" && look.build && canEdit
 		// Compact names what it builds; a phone's subtitle follows the status, which already says.
 		? { name: compact && !phone ? "Build changes" : "Build", run: build.rebuild }
+		// Tasks already made into issues can still be built on a machine: Approve plan starts them.
+		: look.kind === "issued" && look.build && canEdit && !machineOffline
+		? { name: "Approve plan", run: build.approve }
 		: undefined;
 	let refused = action?.run === build.rebuild ? build.rebuildError : undefined;
 	let busy = build.busy || build.rebuilding;

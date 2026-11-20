@@ -22,6 +22,7 @@ import {
 import type { PullRequestState } from "./builds";
 import { implementationLifecycle } from "./lifecycle";
 import { unapprovedContext } from "./open-decisions";
+import { issueLinks } from "./issues";
 
 /** Why a build claimed before the server restarted ended: the server forgot it. */
 export const RESTARTED = "Chopin restarted, so this build ended.";
@@ -580,6 +581,7 @@ export function implementationConnector(
 								lifecycle: plan.lifecycle,
 							}),
 							...unapprovedContext(plan.records.values()),
+							...issueLinks(plan),
 							...await requestedBy(plan, build, connection),
 							...(build.planSource ? { planSource: structuredClone(build.planSource) } : {}),
 						}));

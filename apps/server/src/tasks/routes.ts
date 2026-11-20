@@ -11,6 +11,7 @@ import {
 import { implementationLifecycle } from "./lifecycle";
 import { planSourceFor } from "./plan-source";
 import { planningReadiness, reportImplementationLifecycle } from "./plan-graphs";
+import { assigneesSchema, exporting, exportIssues, issuesSnapshot, pendingLinks } from "./issues";
 import { exclusive } from "../plan/service";
 import { GitHubError } from "../github/client";
 import type { GitHubReferenceSource } from "../github/client";
@@ -328,6 +329,8 @@ export function registerImplementationRoutes(router: Router, auth: HostedAuth, o
 							: { execution: { state: "idle" }, history: [] },
 						...(live ? { live } : {}),
 					};
+					let issues = issuesSnapshot(plan, exporting(id));
+					if (issues) snapshot.issues = issues;
 					// The builds the snapshot names, whose machines everyone who sees them may know.
 					let named = [
 						snapshot.build,
@@ -562,6 +565,99 @@ export function registerImplementationRoutes(router: Router, auth: HostedAuth, o
 			}
 			await options.withPlan(id, async plan => requestBuild(plan, undefined));
 			return json({ accepted: true });
+		}),
+	);
+	router.on(
+		"POST",
+		"/api/channels/:id/implementation/issues",
+		safe(async (request, _url, { id }) => {
+			if (!ownOrigin(auth.config, request.headers.get("origin"))) {
+				throw new GitHubError("origin is not allowed", 403);
+			}
+			let { session, channel, repository } = await browser(request, id);
+			if (!repository.permissions.push && !repository.permissions.admin || channel.archivedAt) {
+				throw new GitHubError("repository write access is required", 403);
+			}
+			let input = await body(
+				request,
+				z.object({
+					graphNumber: z.number().int().positive(),
+					graphRevision: z.number().int().positive(),
+					assignees: assigneesSchema,
+				}).strict(),
+			);
+			let github = auth.github;
+			let { createIssue, addSubIssue, addBlockedBy, addAssignees, issuesBy, closeIssue } = github;
+			if (!createIssue || !addSubIssue || !addBlockedBy || !addAssignees) {
+				throw new GitHubError("this server cannot create issues", 501);
+			}
+			// With Issues read-only the App can still open and link issues on a public repository, as
+			// anyone may open one, but never assign them: the export skips assigning and says why.
+			let installedRepository = github.installedRepository;
+			let installed = installedRepository
+				? await auth.sessions.use(
+					session,
+					token =>
+						installedRepository.call(
+							github,
+							token,
+							channel.repositoryOwner,
+							channel.repositoryName,
+						),
+				).then(result => result.value, () => undefined)
+				: undefined;
+			let canAssign = installed?.installation.writable?.issues !== false;
+			// Each call runs as the presser; the repository's current name, checked against its node ID.
+			let as = async <T>(call: (token: string) => Promise<T>) =>
+				(await auth.sessions.use(session, call)).value;
+			let { owner, name } = repository;
+			let result = await exportIssues({
+				channelId: id,
+				title: channel.title,
+				url: new URL(
+					documentPath(channel.repositoryOwner, channel.repositoryName, channel.slug),
+					auth.config.origin,
+				)
+					.href,
+				repository: `${owner}/${name}`,
+				defaultBranch: repository.defaultBranch,
+				canAssign,
+				withPlan: action => options.withPlan(id, action),
+				github: {
+					createIssue: issue => as(token => createIssue.call(github, token, owner, name, issue)),
+					addSubIssue: (parent, child) =>
+						as(token => addSubIssue.call(github, token, owner, name, parent, child)),
+					addBlockedBy: (issue, blocker) =>
+						as(token => addBlockedBy.call(github, token, owner, name, issue, blocker)),
+					addAssignees: (issue, assignment) =>
+						as(token => addAssignees.call(github, token, owner, name, issue, assignment)),
+					...(closeIssue
+						? {
+							closeIssue: (issue: number) =>
+								as(token => closeIssue.call(github, token, owner, name, issue)),
+						}
+						: {}),
+					...(issuesBy
+						? {
+							issuesBy: (creator: string, since: string) =>
+								as(token => issuesBy.call(github, token, owner, name, { creator, since })),
+						}
+						: {}),
+				},
+			}, { ...input, by: session.user.login });
+			let built = await options.withPlan(id, async plan => plan.graph?.versions.at(-1));
+			return json({
+				...(result.parent
+					? { parent: { number: result.parent.number, url: result.parent.url } }
+					: {}),
+				...(built && pendingLinks(result, built.definition.tasks) ? { pending: true } : {}),
+				tasks: Object.fromEntries(
+					Object.entries(result.tasks).map(([task, entry]) => [task, {
+						...(entry.issue ? { number: entry.issue.number, url: entry.issue.url } : {}),
+						...(entry.problem ? { problem: entry.problem } : {}),
+					}]),
+				),
+			});
 		}),
 	);
 	router.on(
