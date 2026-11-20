@@ -37,6 +37,27 @@ export function storedQuestion(definition: Definition): number[] {
 	return [...Question.create(definition).toBinary()];
 }
 
+/**
+ * Queuing a build approves the task version it builds, so a seeded build's version is approved too,
+ * as a real one's would be: a draft is only ever newer than every build.
+ */
+export function builtVersionsApproved<
+	G extends { versions: Array<{ number: number; state: string }> },
+>(
+	graph: G,
+	builds: SeedState["builds"],
+): G {
+	let built = new Set((builds ?? []).map(build => build.graphVersion));
+	return {
+		...graph,
+		versions: graph.versions.map(version =>
+			version.state === "draft" && built.has(version.number)
+				? { ...version, state: "approved" }
+				: version
+		),
+	};
+}
+
 export async function storedDocument(source: string) {
 	let document = await Room.create(source);
 	try {
@@ -195,7 +216,7 @@ export async function checkpointSource(
 		threads: state.threads ?? [],
 		transcript: state.transcript ?? [],
 		...(state.questionPage ? { questionPage: state.questionPage } : {}),
-		...(state.graph ? { graph: state.graph } : {}),
+		...(state.graph ? { graph: builtVersionsApproved(state.graph, state.builds) } : {}),
 		...(state.builds ? { builds: state.builds } : {}),
 		...(state.lifecycle ? { lifecycle: state.lifecycle } : {}),
 	} as JsonValue;
