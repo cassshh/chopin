@@ -251,10 +251,10 @@ export function BuildView(
 		return !entry?.number || !!entry.problem || !!entry.assignee && !entry.assigned;
 	});
 	// Every task has its issue, but the export is for older tasks (one removed, a dependency
-	// added) or stopped short (a close GitHub refused): a press brings GitHub up to date, with no
-	// assignees to pick.
+	// added) or stopped short (a close GitHub refused, links an interrupted press left unmade): a
+	// press brings GitHub up to date, with no assignees to pick.
 	let outdated = !!issues?.parent && unfinished.length === 0
-		&& (!issues.current || !!issues.problem);
+		&& (!issues.current || !!issues.problem || !!issues.pending);
 	let createAll = async () => {
 		let graph = snapshot?.graph;
 		if (!graph || creating) return;

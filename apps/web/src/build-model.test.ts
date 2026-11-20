@@ -1214,11 +1214,12 @@ describe("build status", () => {
 		expect(look(snapshot({ issues: partial })).kind).toBe("review");
 	});
 
-	it("counts an export complete only with the parent and every task's issue, and no problem", () => {
+	it("counts an export complete only with the parent and every task's issue, no problem and no link left", () => {
 		let parent = { number: 18, url: "https://github.com/o/r/issues/18" };
 		let issue = { number: 19, url: "https://github.com/o/r/issues/19" };
 		expect(issuesComplete({ parent, tasks: { a: issue } }, ["a"])).toBe(true);
 		expect(issuesComplete({ tasks: { a: issue } }, ["a"])).toBe(false);
+		expect(issuesComplete({ parent, pending: true, tasks: { a: issue } }, ["a"])).toBe(false);
 		expect(issuesComplete({ parent, tasks: { a: issue } }, ["a", "b"])).toBe(false);
 		expect(
 			issuesComplete({ parent, tasks: { a: { ...issue, problem: "Couldn't link it" } } }, ["a"]),

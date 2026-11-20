@@ -159,14 +159,31 @@ export function issueLinks(plan: { issues?: IssueExport; graph?: Graph }): {
 }
 
 /** What the browser shows of an export: issue links, assignees and any step that failed. */
+/**
+ * Whether an issue the export made still waits for its sub-issue link or a blocked-by link to a
+ * dependency's issue: work an interrupted press left, which a press again finishes.
+ */
+export function pendingLinks(issues: IssueExport, tasks: Task[]): boolean {
+	return tasks.some(task => {
+		let entry = issues.tasks[task.id];
+		if (!entry?.issue) return false;
+		if (issues.parent && !entry.linked) return true;
+		return task.dependsOn.some(id =>
+			!!issues.tasks[id]?.issue && !(entry.blockedBy ?? []).includes(id)
+		);
+	});
+}
+
 export function issuesSnapshot(plan: Plan, running: boolean): IssueExportSnapshot | undefined {
 	let issues = plan.issues;
 	if (!issues) return;
 	let graph = plan.graph?.versions.at(-1);
+	let current = graph?.number === issues.graphNumber && graph.revision === issues.graphRevision;
 	return {
 		by: issues.by,
-		current: graph?.number === issues.graphNumber && graph.revision === issues.graphRevision,
+		current,
 		running,
+		...(current && pendingLinks(issues, graph!.definition.tasks) ? { pending: true as const } : {}),
 		...(issues.parent ? { parent: { number: issues.parent.number, url: issues.parent.url } } : {}),
 		...(issues.problem ? { problem: issues.problem } : {}),
 		tasks: Object.fromEntries(

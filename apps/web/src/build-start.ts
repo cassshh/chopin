@@ -90,12 +90,17 @@ export async function stopBuild(room: string, id: string): Promise<void> {
 /** What an export made: the parent, and each task's issue or what stopped it. */
 export type IssuesResult = {
 	parent?: { number: number; url: string };
+	/** An issue still waits for its sub-issue or blocked-by link. */
+	pending?: true;
 	tasks: Record<string, { number?: number; url?: string; problem?: string }>;
 };
 
-/** Whether an export made the parent and an issue for every one of `taskIds`, with no problem. */
+/**
+ * Whether an export made the parent and an issue for every one of `taskIds`, with no problem and no
+ * link left to make.
+ */
 export function issuesComplete(result: IssuesResult, taskIds: string[]): boolean {
-	return !!result.parent
+	return !!result.parent && !result.pending
 		&& taskIds.every(id => result.tasks[id]?.number !== undefined && !result.tasks[id]?.problem);
 }
 

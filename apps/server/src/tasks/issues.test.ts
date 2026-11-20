@@ -11,6 +11,7 @@ import {
 	issuesSnapshot,
 	MAX_PENDING_CLOSES,
 	parentIssue,
+	pendingLinks,
 	READ_ONLY_ISSUES,
 	RECOVERY_FAILED,
 	restoreIssues,
@@ -236,6 +237,18 @@ describe("exportIssues", () => {
 				parent: { number: 1 },
 				tasks: { model: { number: 2, assignee: "ana", assigned: true }, api: { number: 3 } },
 			});
+			expect(issuesSnapshot(context.plan, false)?.pending).toBeUndefined();
+			// A press interrupted after every issue was saved, before its links were: the snapshot
+			// says links wait, so Build offers the press that finishes them.
+			let tasksOf = context.plan.graph!.versions.at(-1)!.definition.tasks;
+			let unlinked = structuredClone(context.plan.issues!);
+			delete unlinked.tasks.ui!.linked;
+			expect(pendingLinks(unlinked, tasksOf)).toBe(true);
+			let unblocked = structuredClone(context.plan.issues!);
+			unblocked.tasks.ui!.blockedBy = ["api"];
+			expect(pendingLinks(unblocked, tasksOf)).toBe(true);
+			context.plan.issues = unlinked;
+			expect(issuesSnapshot(context.plan, false)?.pending).toBe(true);
 			// Every step was committed and announced.
 			expect(context.broadcasts.some(frame => frame.kind === "plan:implementation")).toBe(true);
 			expect(notices).toEqual([{
