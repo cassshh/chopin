@@ -569,6 +569,9 @@ function nextPage(link: string | null, api: string, path: string): number | unde
 }
 
 /** Narrow GitHub OAuth and repository API client with validated responses. */
+/** Pages of 100 a recovery listing reads before it gives up rather than guess. */
+const MAX_ISSUE_PAGES = 10;
+
 export class GitHubClient implements GitHub, GitHubReferenceSource {
 	readonly #fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 	readonly #endpoints: Endpoints;
@@ -892,7 +895,7 @@ export class GitHubClient implements GitHub, GitHubReferenceSource {
 		let found: GitHubIssueBody[] = [];
 		let page: number | undefined = 1;
 		let visited = new Set<number>();
-		while (page && !visited.has(page) && visited.size < 3) {
+		while (page && !visited.has(page) && visited.size < MAX_ISSUE_PAGES) {
 			visited.add(page);
 			let url = new URL(path, this.#endpoints.api);
 			url.searchParams.set("creator", query.creator);
@@ -921,6 +924,9 @@ export class GitHubClient implements GitHub, GitHubReferenceSource {
 			}
 			page = nextPage(response.headers.get("link"), this.#endpoints.api, path);
 		}
+		// Recovery takes an issue missing from the list as one never made, so a list cut short (too
+		// many pages, or a page GitHub named twice) must fail rather than read as complete.
+		if (page) throw new GitHubError("GitHub listed more issues than recovery can read");
 		return found;
 	}
 
