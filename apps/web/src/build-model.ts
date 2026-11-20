@@ -411,7 +411,9 @@ export function buildPhase(snapshot: Snapshot | undefined): BuildPhase {
 	if (!graph) return { kind: "drafting", draft: "prepare" };
 	if (graph.planRevision !== snapshot.planRevision) return { kind: "drafting", draft: "revise" };
 	if (run?.outcome.kind === "revision_requested") return { kind: "drafting", draft: "returned" };
-	if (ended) return { kind: "failed" };
+	// Queuing a build approves its tasks first, so a draft is newer than any build that ended: it
+	// waits for review, and only the tasks that build approved are its to retry.
+	if (ended && graph.state !== "draft") return { kind: "failed" };
 	return { kind: "review" };
 }
 
