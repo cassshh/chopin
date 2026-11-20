@@ -63,7 +63,9 @@ export function taskMarker(channelId: string, taskId: string): string {
 	return `<!-- chopin:${channelId}:${taskId} -->`;
 }
 
-let login = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/);
+// GitHub logins, including a managed user's `handle_shortcode`, as admission accepts them
+// (`auth/config.ts`): a stored press by one must restore, or the document would not open.
+let login = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9_])?$/);
 let refSchema = z.object({
 	id: z.number().int().positive(),
 	number: z.number().int().positive(),

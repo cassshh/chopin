@@ -802,6 +802,15 @@ describe("exportIssues", () => {
 		} finally {
 			await Service.close(reopened);
 		}
+		// A managed user's login (`handle_shortcode`), which admission accepts, restores too.
+		let managed = {
+			...stored!,
+			by: "mona_acme",
+			unresolved: [{ by: "hubot_acme", at: stored!.at }],
+			tasks: { ...stored!.tasks, api: { ...stored!.tasks.api, assignee: "octo_acme" } },
+		};
+		expect(restoreIssues(managed)).toEqual(managed);
+		expect(() => restoreIssues({ ...stored, by: "_mona" })).toThrow();
 		expect(() => restoreIssues({ ...stored, unknown: true })).toThrow();
 		expect(() =>
 			restoreIssues({ ...stored, tasks: { api: { issue: { id: 1, number: 0, url: "x" } } } })
