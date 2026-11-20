@@ -106,9 +106,10 @@ function MachineLabel({ machine }: { machine: BuildMachine }) {
 }
 
 /**
- * The build's status and its tasks. Build only reads: the header's Build plan
- * and capsule start and retry builds, so opening this view never starts one.
- * It keeps the recoveries that need its context, such as Return to planning.
+ * The build's status and its tasks. Opening this view never starts anything: the header's Build
+ * plan drafts tasks, and Approve plan (in the header, or on the review card here, beside the
+ * tasks it approves) starts them. It keeps the recoveries that need its context, such as Return
+ * to planning.
  */
 export function BuildView(
 	{
@@ -116,6 +117,7 @@ export function BuildView(
 		build,
 		canEdit,
 		comments,
+		machineOffline,
 		onShowDocument,
 		room,
 		userId,
@@ -123,6 +125,8 @@ export function BuildView(
 		active: boolean;
 		build: BuildPlan;
 		canEdit: boolean;
+		/** The chosen machine is offline, named: Approve plan waits for it, as in the header. */
+		machineOffline?: string;
 		/** Accepted comments the document has not yet taken in. */
 		comments: number;
 		onShowDocument: () => void;
@@ -221,6 +225,23 @@ export function BuildView(
 
 	let action: ReactNode;
 	function statusCard(): Card {
+		// Drafted tasks wait here for review; Approve plan approves exactly these and starts them.
+		if (look.kind === "review") {
+			return {
+				title: "Ready for review",
+				count: plural(look.tasks, "task", "tasks"),
+				// An element, not a string: a sentence this long wraps instead of fading in on one line.
+				detail: look.blocked ?? (
+					<span>
+						{build.reviewChanged
+							? "The tasks changed while you were reviewing them, so nothing was approved. Read them again, then approve."
+							: machineOffline
+							? `${machineOffline}. Approve plan builds these tasks once it is back, or on another machine you choose.`
+							: "Read the tasks below, then Approve plan builds them on your machine. Editing the document drafts them again."}
+					</span>
+				),
+			};
+		}
 		if (look.kind === "plan") {
 			// Built before, now back in planning: Build plan in the header builds it again.
 			if (phase.kind === "blocked") {
@@ -246,16 +267,19 @@ export function BuildView(
 			if (phase.kind === "drafting" && phase.draft === "returned" && snapshot) {
 				return endedCard(snapshot);
 			}
-			// Build plan is the approval: pressing it approves these tasks and starts them.
-			return {
-				title: "Not built yet",
-				...(phase.kind === "review"
-					? {
-						count: plural(tasks.length, "task", "tasks"),
-						detail: "Build plan approves these tasks and builds them.",
-					}
-					: {}),
-			};
+			// Drafted for an older revision: say why they are greyed and what brings them up to date.
+			if (phase.kind === "drafting" && phase.draft === "revise" && staleTasks) {
+				return {
+					title: "Tasks out of date",
+					detail: (
+						<span>
+							The document changed after these tasks were drafted. Build plan drafts them again for
+							review.
+						</span>
+					),
+				};
+			}
+			return { title: "Not built yet" };
 		}
 		if (look.kind === "tasks") {
 			return {
@@ -359,6 +383,29 @@ export function BuildView(
 	let when = buildAgo(shown, now);
 	let from = planSourceLine(shown);
 
+	if (look.kind === "review" && canEdit) {
+		// An offline chosen machine holds approval here as it does in the header.
+		let blocked = look.blocked ?? machineOffline;
+		action = (
+			<button
+				aria-busy={build.busy || undefined}
+				aria-disabled={blocked || build.busy ? true : undefined}
+				className={`btn btn-sm btn-primary shrink-0${
+					!look.blocked && machineOffline ? " machine-offline" : ""
+				}`}
+				// Offline is said in the card's text above, as the header says it only to screen readers.
+				data-tooltip={look.blocked}
+				onClick={() => {
+					if (blocked || build.busy) return;
+					setActionError(undefined);
+					build.approve();
+				}}
+				type="button"
+			>
+				Approve plan
+			</button>
+		);
+	}
 	if (phase.kind === "stopped" && canEdit && !returning) {
 		action = (
 			<button

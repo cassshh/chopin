@@ -141,7 +141,10 @@ describe("endedCard", () => {
 		expect(returned(
 			{ ...build("failed"), error: "Stopped in Chopin.", stoppedBy: "ana", finishedAt: at },
 			"Stopped in Chopin by @ana.",
-		)).toEqual({ title: "Stopped by @ana", detail: `At ${time}. Build plan builds it again.` });
+		)).toEqual({
+			title: "Stopped by @ana",
+			detail: `At ${time}. Build plan drafts it again for review.`,
+		});
 	});
 
 	it("says its agent blocked a task, leading with the agent's reason", () => {
@@ -151,7 +154,7 @@ describe("endedCard", () => {
 			blocker: "Missing source: the files",
 		}])).toEqual({
 			title: "Blocked",
-			detail: "Missing source: the files. Build plan builds it again.",
+			detail: "Missing source: the files. Build plan drafts it again for review.",
 		});
 	});
 
@@ -161,25 +164,25 @@ describe("endedCard", () => {
 			"Your local agent disconnected.",
 		)).toEqual({
 			title: "Build failed",
-			detail: "Your local agent disconnected. Build plan builds it again.",
+			detail: "Your local agent disconnected. Build plan drafts it again for review.",
 		});
 		expect(returned(
 			{ ...build("failed"), error: "Stopped from the connector terminal." },
 			"Stopped from the connector terminal.",
 		)).toEqual({
 			title: "Stopped from the connector terminal",
-			detail: "Build plan builds it again.",
+			detail: "Build plan drafts it again for review.",
 		});
 	});
 
 	it("keeps Returned for changes for a run its agent or a reviewer returned", () => {
 		expect(returned(build("stopped"), "Split it")).toEqual({
 			title: "Returned for changes",
-			detail: "Split it. Build plan builds it again.",
+			detail: "Split it. Build plan drafts it again for review.",
 		});
 		expect(returned(build("stopped"), "The build stopped before it finished.")).toEqual({
 			title: "Stopped before it finished",
-			detail: "Build plan builds it again.",
+			detail: "Build plan drafts it again for review.",
 		});
 	});
 });
@@ -198,13 +201,20 @@ describe("buildPhase", () => {
 			kind: "drafting",
 			draft: "revise",
 		});
-		expect(buildPhase(snapshot({
+		let returned = {
 			build: build("stopped"),
 			lifecycle: {
-				execution: { state: "idle" },
+				execution: { state: "idle" as const },
 				history: [run({ kind: "revision_requested", reason: "Split it" })],
 			},
-		}))).toEqual({ kind: "drafting", draft: "returned" });
+		};
+		let approved = { ...snapshot().graph!, state: "approved" as const };
+		expect(buildPhase(snapshot({ ...returned, graph: approved }))).toEqual({
+			kind: "drafting",
+			draft: "returned",
+		});
+		// Build plan drafted the returned tasks again: the new draft waits for review.
+		expect(buildPhase(snapshot(returned))).toEqual({ kind: "review" });
 	});
 
 	it("names each blocker before drafting", () => {
@@ -233,11 +243,26 @@ describe("buildPhase", () => {
 	});
 
 	it("separates a failure before the claim from a stop while the run holds the tasks", () => {
-		expect(buildPhase(snapshot({ build: build("failed") }))).toEqual({ kind: "failed" });
+		let approved = { ...snapshot().graph!, state: "approved" as const };
+		expect(buildPhase(snapshot({ build: build("failed"), graph: approved }))).toEqual({
+			kind: "failed",
+		});
 		expect(buildPhase(snapshot({
 			build: build("stopped"),
 			lifecycle: { execution: { state: "active" }, history: [] },
 		}))).toEqual({ kind: "stopped" });
+	});
+
+	it("reads tasks drafted again after a build that ended as ready for review, not as its retry", () => {
+		for (let state of ["failed", "stopped"] as const) {
+			expect(buildPhase(snapshot({ build: build(state) }))).toEqual({ kind: "review" });
+		}
+		// Build plan's fresh draft waits for Approve plan; it never starts the ended build again.
+		let draft = { stage: "drafting", sent: true } as const;
+		expect(firstBuildStep(snapshot({ build: build("failed") }), draft)).toEqual({
+			view: "idle",
+			next: "reset",
+		});
 	});
 
 	it("counts distinct pull requests when done", () => {
@@ -355,10 +380,12 @@ describe("first build", () => {
 
 	it("retries a build that failed before it claimed its tasks from the same tasks", () => {
 		let state = advanceFirstBuild(idle, { type: "press" });
-		expect(firstBuildStep(snapshot({ build: build("failed") }), state).next).toBe("start");
+		let approved = { ...snapshot().graph!, state: "approved" as const };
+		expect(firstBuildStep(snapshot({ build: build("failed"), graph: approved }), state).next)
+			.toBe("start");
 	});
 
-	it("drafts, then starts the drafted tasks without a review step", () => {
+	it("drafts for review, then Approve plan starts the drafted tasks", () => {
 		let state = advanceFirstBuild(idle, { type: "press" });
 		expect(firstBuildStep(fresh, state)).toEqual({ view: "working", next: "draft" });
 		state = advanceFirstBuild(state, { type: "draft-sent" });
@@ -366,7 +393,16 @@ describe("first build", () => {
 		// Tasks for an older revision are not the drafted ones.
 		let stale = snapshot({ planRevision: 5 });
 		expect(firstBuildStep(stale, state)).toEqual({ view: "working" });
+		// The drafted tasks wait for review: the press ends without starting anything.
+		expect(firstBuildStep(snapshot(), state)).toEqual({ view: "idle", next: "reset" });
+		state = advanceFirstBuild(state, { type: "reset" });
+		expect(firstBuildStep(snapshot(), state)).toEqual({ view: "idle" });
+		// Approve plan starts exactly those tasks.
+		state = advanceFirstBuild(state, { type: "approve" });
+		expect(state).toEqual({ stage: "approving" });
 		expect(firstBuildStep(snapshot(), state)).toEqual({ view: "working", next: "start" });
+		// Stale by the time it is pressed: nothing to start, the slot drafts again.
+		expect(firstBuildStep(stale, state)).toEqual({ view: "idle", next: "reset" });
 		state = advanceFirstBuild(state, { type: "start" });
 		expect(state).toEqual({ stage: "starting" });
 		expect(firstBuildStep(snapshot(), state)).toEqual({ view: "working" });
@@ -376,9 +412,14 @@ describe("first build", () => {
 			.toEqual({ view: "working", next: "reset" });
 	});
 
-	it("starts existing tasks for this revision at once", () => {
+	it("never starts existing tasks from Build plan, only from Approve plan", () => {
 		let state = advanceFirstBuild(idle, { type: "press" });
-		expect(firstBuildStep(snapshot(), state).next).toBe("start");
+		expect(firstBuildStep(snapshot(), state).next).toBe("reset");
+		expect(firstBuildStep(snapshot(), advanceFirstBuild(idle, { type: "approve" })).next)
+			.toBe("start");
+		// Approve plan is also how a failed start is tried again.
+		let failed = { stage: "failed", agent: true } as const;
+		expect(advanceFirstBuild(failed, { type: "approve" })).toEqual({ stage: "approving" });
 	});
 
 	it("drafts once more when edits made the first draft stale, then says the document changed", () => {
@@ -508,8 +549,9 @@ describe("first build", () => {
 		expect(firstBuildStep(answered, state, "me")).toEqual({ view: "working", next: "draft" });
 		state = advanceFirstBuild(state, { type: "draft-sent" });
 		expect(firstBuildStep(answered, state, "me")).toEqual({ view: "working" });
+		// The redrafted tasks wait for review like any draft.
 		let redrafted = snapshot({ ...requested });
-		expect(firstBuildStep(redrafted, state, "me")).toEqual({ view: "working", next: "start" });
+		expect(firstBuildStep(redrafted, state, "me")).toEqual({ view: "idle", next: "reset" });
 	});
 
 	it("resumes a request the server kept across a reload", () => {
@@ -856,23 +898,28 @@ describe("build status", () => {
 			kind: "plan",
 			blocked: "Waiting on 1 investigation",
 		});
-		expect(look(snapshot({ buildReady: false }))).toEqual({ kind: "plan", blocked: undefined });
+		expect(look(snapshot({ graph: undefined, buildReady: false })))
+			.toEqual({ kind: "plan", blocked: undefined });
 	});
 
 	it("offers Build plan before the first build, inert with its reason", () => {
-		expect(look(snapshot())).toEqual({ kind: "plan", blocked: undefined });
-		expect(look(snapshot(), { hasContent: false })).toEqual({
+		let untasked = (change: Partial<ImplementationSnapshot> = {}) =>
+			snapshot({ graph: undefined, ...change });
+		expect(look(untasked())).toEqual({ kind: "plan", blocked: undefined });
+		expect(look(untasked(), { hasContent: false })).toEqual({
 			kind: "plan",
 			blocked: "Write the document first",
 		});
-		expect(look(snapshot({ blockers: ["accepted comments awaiting plan changes"] }))).toEqual({
+		expect(look(untasked({ blockers: ["accepted comments awaiting plan changes"] }))).toEqual({
 			kind: "plan",
 			blocked: "Update the document for accepted comments first",
 		});
-		expect(look(snapshot({ buildReady: false }))).toEqual({
+		expect(look(untasked({ buildReady: false }))).toEqual({
 			kind: "plan",
 			blocked: undefined,
 		});
+		// Tasks drafted for an older revision are stale: Build plan drafts them again.
+		expect(look(snapshot({ planRevision: 5 })).kind).toBe("plan");
 		expect(look(snapshot({ graph: undefined }), { planner: false })).toEqual({
 			kind: "plan",
 			blocked: "chopin isn’t running for this document",
@@ -946,10 +993,11 @@ describe("build status", () => {
 		);
 		expect(early).toEqual({ kind: "building", done: 0, total: 1, tip: "0 of 1 tasks built" });
 		expect(buildLabel(early)).toBe("Building 0 of 1");
-		let failed = look(snapshot({ build: build("failed") }));
+		let approved = { ...snapshot().graph!, state: "approved" as const };
+		let failed = look(snapshot({ build: build("failed"), graph: approved }));
 		expect(failed).toMatchObject({ kind: "stopped", retry: true });
 		expect(buildLabel(failed)).toBe("Build stopped");
-		expect(look(snapshot({ build: build("failed") }), { canEdit: false }))
+		expect(look(snapshot({ build: build("failed"), graph: approved }), { canEdit: false }))
 			.toMatchObject({ retry: false });
 		// Nothing ran, so a press that found no local agent never reads as stopped.
 		let noAgent = look(snapshot(), { state: { stage: "failed", agent: true } });
@@ -1068,11 +1116,45 @@ describe("build status", () => {
 			.toMatchObject({ tip: "Edits since someone else’s build" });
 	});
 
-	it("opens Build only once there is a build or a press under way", () => {
-		expect(buildTabReady(snapshot(), look(snapshot()))).toBe(false);
+	it("asks for review of drafted tasks with Approve plan, which needs no Planner", () => {
+		let review = look(snapshot());
+		expect(review).toEqual({
+			kind: "review",
+			tasks: 1,
+			tip: "Review the 1 task in Build, then approve the plan to start building",
+		});
+		expect(buildLabel(review)).toBe("Approve plan");
+		expect(buildTabReady(snapshot(), review)).toBe(true);
+		// Starting drafted tasks needs no Planner, only the connection.
+		expect(look(snapshot(), { planner: false }).kind).toBe("review");
+		expect(look(snapshot(), { connected: false })).toMatchObject({
+			kind: "review",
+			blocked: "Chopin isn’t connected",
+		});
+		// A blocker raised after the draft holds approval too.
+		expect(look(snapshot({
+			blockers: ["required investigations"],
+			buildInvestigations: [{ id: "i", brief: "b", reason: "r" }],
+		}))).toMatchObject({ kind: "plan", blocked: "Waiting on 1 investigation" });
+		// While Approve plan starts them, the slot shows the press under way.
+		expect(look(snapshot(), { state: { stage: "approving" } }).kind).toBe("tasks");
+	});
+
+	it("opens Build only once there is a build, tasks to review, or a press under way", () => {
+		let untasked = snapshot({ graph: undefined });
+		expect(buildTabReady(untasked, look(untasked))).toBe(false);
+		// Tasks an edit put out of date stay readable, though Build plan has to draft them again.
+		let stale = snapshot({ planRevision: 5 });
+		expect(look(stale).kind).toBe("plan");
+		expect(buildTabReady(stale, look(stale))).toBe(true);
+		// A blocker raised during review holds approval, not reading the tasks.
+		let blocked = snapshot({ blockers: ["accepted comments awaiting plan changes"] });
+		expect(look(blocked).kind).toBe("plan");
+		expect(buildTabReady(blocked, look(blocked))).toBe(true);
 		let pressed = { stage: "drafting", sent: false } as const;
 		expect(buildTabReady(snapshot(), look(snapshot(), { state: pressed }))).toBe(true);
 		let returned = snapshot({
+			graph: { ...snapshot().graph!, state: "approved" },
 			build: build("stopped"),
 			lifecycle: {
 				execution: { state: "idle" },

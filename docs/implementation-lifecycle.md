@@ -20,7 +20,8 @@ implementation, automatic restart and an installer remain future work.
 - The **hosted Planner** reads the current plan and drafts or revises tasks with
   `read_implementation_graph` and `edit_implementation_graph`.
 - A **person** is the only actor allowed by the domain model to approve a draft.
-  The header's **Build plan** press approves the exact drafted
+  The header's **Build plan** press asks for the tasks and stops for review; its
+  **Approve plan** press approves the exact drafted
   graph and queues it, with the connection and checkout of the machine the clicker
   chose (their own, or a teammate's shared one, recorded as `machineOwner`), in one
   durable commit.
@@ -40,15 +41,29 @@ and current tool descriptions remain authoritative.
 Only **Build plan** in the document header sends `implementation:draft`, and
 only when the document has no tasks for its current revision, or its last build
 was returned for changes. Opening the Build tab never drafts or starts anything;
-the tab stays off until the plan has been built or a press is under way. Build
-plan is always present for writers. While the document is empty, has accepted
+the tab stays off until there are tasks to review, the plan has been built, or a
+press is under way. Build plan is always present for writers. While the document is empty, has accepted
 comments awaiting plan changes, or has required investigations, it is inert and
 names what is waiting. Pressing a blocked Build reveals the related
 investigation card. Open decisions never hold it back, and neither does a
 completeness score; see [Open decisions](#open-decisions-never-block-a-build). With `LIVE_BUILD`,
 a debounced assessment instead asks the existing owner-bound Planner to place
 necessary decisions and investigations in the document and explain them in Chat.
-It never claims an owner or runs an investigation. After the press the same slot becomes a status capsule:
+It never claims an owner or runs an investigation.
+
+Build plan's draft never starts by itself. Once the Planner has saved the tasks,
+the slot reads **Approve plan** and the Build tab opens on a **Ready for review**
+card listing them; nothing is approved and the graph stays a draft. Reading the
+tasks and pressing **Approve plan** (in the header or on the card) sends the
+reviewed graph version and revision to `POST /api/channels/:id/implementation`,
+which approves exactly that draft and queues it in one durable commit, with the
+same refusals as before (machine offline, no workspace, accepted comments,
+required investigations). An edit to the document before approval makes the
+draft stale: the slot goes back to **Build plan**, which drafts the tasks again,
+and an approval of the stale tasks is refused. A chosen machine that is offline
+dims both buttons, as it did the one-click press.
+
+After Approve plan the same slot becomes a status capsule:
 **Breaking into tasks…**, **Building 3 of 8**, **Built**, **N changes to
 build**, **Building changes…**, or **Build stopped**/**Build failed** with
 **Retry**. The Build tab carries the same glyph, and the change count is the

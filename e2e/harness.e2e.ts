@@ -382,7 +382,8 @@ test("only Build plan asks the Planner for tasks, once, without a Chat message, 
 	// Frames arrive in order, so a draft from the tab would land before Build plan's.
 	await expect.poll(() => drafts.length).toBeGreaterThan(0);
 	expect(drafts).toHaveLength(1);
-	expect(drafts[0]!.build).toBe(true);
+	// Build plan drafts for review: no one-click flag asks the server to start them.
+	expect(drafts[0]!.build).toBeUndefined();
 	expect(drafts[0]!.planRevision).toBeGreaterThanOrEqual(0);
 	await expect(tab).toBeEnabled();
 	// The scripted Planner answers without tasks, so the press stops with a way to retry.
@@ -405,7 +406,7 @@ test("only Build plan asks the Planner for tasks, once, without a Chat message, 
 	// Opening Build sent nothing: the next draft is Retry's own.
 	await expect.poll(() => drafts.length).toBeGreaterThan(1);
 	expect(drafts).toHaveLength(2);
-	expect(drafts[1]!.build).toBe(true);
+	expect(drafts[1]!.build).toBeUndefined();
 	expect(drafts[1]!.planRevision).toBe(drafts[0]!.planRevision);
 	expect(sends).toHaveLength(0);
 });
