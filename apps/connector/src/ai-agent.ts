@@ -42,6 +42,22 @@ export const OWNER_AGENT_VARIABLES = new Set([
 	"ATOMIC_MODEL_CATALOG_URL",
 	"PI_MODEL_CATALOG_URL",
 	"COPILOT_HOME",
+	"COPILOT_PROVIDERS_CONFIG",
+	"COPILOT_PROVIDER_BASE_URL",
+	"COPILOT_PROVIDER_TYPE",
+	"COPILOT_PROVIDER_API_KEY",
+	"COPILOT_PROVIDER_API_KEY_COMMAND",
+	"COPILOT_PROVIDER_BEARER_TOKEN",
+	"COPILOT_PROVIDER_HEADERS",
+	"COPILOT_PROVIDER_WIRE_API",
+	"COPILOT_PROVIDER_TRANSPORT",
+	"COPILOT_PROVIDER_AZURE_API_VERSION",
+	"COPILOT_PROVIDER_MODEL_ID",
+	"COPILOT_PROVIDER_WIRE_MODEL",
+	"COPILOT_PROVIDER_MAX_PROMPT_TOKENS",
+	"COPILOT_PROVIDER_MAX_OUTPUT_TOKENS",
+	"COPILOT_PROVIDER_VISION",
+	"COPILOT_OFFLINE",
 	"CLAUDE_CONFIG_DIR",
 	"CODEX_HOME",
 ]);
@@ -208,6 +224,116 @@ export function atomicAgent(command: readonly string[]): boolean {
 }
 
 /**
+ * Whether a command starts GitHub Copilot CLI. It reads no provider's variables, so it is pointed at
+ * the relay as a custom model provider (its `COPILOT_PROVIDER_` variables).
+ */
+export function copilotAgent(command: readonly string[]): boolean {
+	let program = basename((command[0] ?? "").replaceAll("\\", "/")).replace(
+		/\.(exe|cmd|bat|ps1)$/i,
+		"",
+	);
+	return program === "copilot";
+}
+
+/** The Copilot model a Copilot CLI agent runs on through the relay, as Copilot's model list says. */
+export type CopilotModel = {
+	id: string;
+	/** Copilot serves it on `/chat/completions`, or only on `/responses`. */
+	wire: "completions" | "responses";
+	maxPromptTokens?: number;
+	maxOutputTokens?: number;
+	vision?: boolean;
+};
+
+function record(value: unknown): Record<string, unknown> | undefined {
+	return value && typeof value === "object" && !Array.isArray(value)
+		? value as Record<string, unknown>
+		: undefined;
+}
+
+function count(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * The model from Copilot's `/models` answer that a Copilot CLI agent runs on: `preferred` when the
+ * list has it, else Copilot's default chat model, else the first chat model with tool calls that
+ * the person's picker offers. Undefined when the list has none.
+ */
+export function chooseCopilotModel(list: unknown, preferred?: string): CopilotModel | undefined {
+	let data = record(list)?.data;
+	let usable = (Array.isArray(data) ? data : []).flatMap(entry => {
+		let model = record(entry);
+		let capabilities = record(model?.capabilities);
+		let supports = record(capabilities?.supports);
+		if (typeof model?.id !== "string" || capabilities?.type !== "chat") return [];
+		if (model.model_picker_enabled === false || supports?.tool_calls === false) return [];
+		let policy = record(model.policy);
+		if (policy?.state === "disabled") return [];
+		let endpoints = Array.isArray(model.supported_endpoints) ? model.supported_endpoints : [];
+		let wire: CopilotModel["wire"] =
+			endpoints.length === 0 || endpoints.includes("/chat/completions")
+				? "completions"
+				: endpoints.includes("/responses")
+				? "responses"
+				: "completions";
+		if (
+			endpoints.length > 0
+			&& !endpoints.some(path => path === "/chat/completions" || path === "/responses")
+		) {
+			return [];
+		}
+		let limits = record(capabilities.limits);
+		let chosen: CopilotModel = { id: model.id, wire };
+		let maxPromptTokens = count(limits?.max_prompt_tokens);
+		let maxOutputTokens = count(limits?.max_output_tokens);
+		if (maxPromptTokens) chosen.maxPromptTokens = maxPromptTokens;
+		if (maxOutputTokens) chosen.maxOutputTokens = maxOutputTokens;
+		if (supports?.vision === true) chosen.vision = true;
+		return [{ chosen, default: model.is_chat_default === true }];
+	});
+	return (
+		usable.find(item => preferred && item.chosen.id === preferred)
+			?? usable.find(item => item.default)
+			?? usable[0]
+	)?.chosen;
+}
+
+/**
+ * What a Copilot CLI agent needs to run on the launch's Copilot through the relay: Copilot's base
+ * URL on the relay as its custom provider (OpenAI's API, which Copilot's `/chat/completions` and
+ * `/responses` speak), the stand-in as its bearer token, Copilot's headers, and the model. With a
+ * custom provider it asks GitHub for no sign-in, so `COPILOT_GITHUB_TOKEN` is left out.
+ */
+export function copilotProviderEnvironment(
+	baseUrl: string,
+	placeholder: string,
+	model?: CopilotModel,
+): Record<string, string> {
+	return {
+		COPILOT_PROVIDER_BASE_URL: baseUrl,
+		COPILOT_PROVIDER_TYPE: "openai",
+		COPILOT_PROVIDER_BEARER_TOKEN: placeholder,
+		COPILOT_PROVIDER_HEADERS: Object.entries(COPILOT_HEADERS)
+			.map(([name, value]) => `${name}: ${value}`)
+			.join("\n"),
+		...(model
+			? {
+				COPILOT_MODEL: model.id,
+				COPILOT_PROVIDER_WIRE_API: model.wire,
+				...(model.maxPromptTokens
+					? { COPILOT_PROVIDER_MAX_PROMPT_TOKENS: String(model.maxPromptTokens) }
+					: {}),
+				...(model.maxOutputTokens
+					? { COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: String(model.maxOutputTokens) }
+					: {}),
+				...(model.vision ? { COPILOT_PROVIDER_VISION: "true" } : {}),
+			}
+			: {}),
+	};
+}
+
+/**
  * Atomic's providers for each of Chopin's, the API-key-only ones included. A ChatGPT or Claude
  * sign-in is Atomic's `openai` or `anthropic`, which take a subscription, ahead of a key for the
  * same provider, which keeps its API-key-only provider.
@@ -286,6 +412,8 @@ export function agentAiEnvironment(options: {
 	home: string;
 	providers: readonly AiProviderGrant[];
 	relayed: Pick<RelayedLaunch, "baseUrls" | "catalogUrl">;
+	/** For a Copilot CLI agent: the Copilot model it runs on, unless the owner's `--env` names one. */
+	copilotModel?: CopilotModel;
 }): Record<string, string> {
 	let { home, providers, relayed } = options;
 	let places = privateAgentState(home);
@@ -325,6 +453,15 @@ export function agentAiEnvironment(options: {
 		if (as === "openai") env.OPENAI_BASE_URL = baseUrl;
 		if (as === "anthropic") env.ANTHROPIC_BASE_URL = baseUrl;
 		if (grant.provider === "chatgpt" && as === "openai") env.OPENAI_API_KEY = grant.placeholder;
+	}
+	let copilot = providers.find(grant => grant.provider === "github-copilot");
+	let copilotUrl = relayed.baseUrls["github-copilot"];
+	if (copilotAgent(options.command) && copilot && copilotUrl) {
+		delete env[copilot.keyVariable];
+		Object.assign(
+			env,
+			copilotProviderEnvironment(copilotUrl, copilot.placeholder, options.copilotModel),
+		);
 	}
 	return env;
 }
