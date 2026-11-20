@@ -30,6 +30,12 @@ const COPILOT_LOGIN = "copilot-swe-agent[bot]";
 const MAX_BODY = 60_000;
 const MAX_FIELD = 12_000;
 export const MAX_EXPORTED_TASKS = 100;
+/**
+ * Issues of removed tasks an export keeps until GitHub confirms each closed. Several graphs' worth,
+ * so only closing that keeps failing reaches it, and then the press is refused rather than a record
+ * dropped.
+ */
+export const MAX_PENDING_CLOSES = 500;
 /** The longest task ID an export stores; `restoreIssues` refuses a longer one. */
 export const MAX_EXPORTED_TASK_ID = 128;
 /** Said when GitHub can't list the issues an earlier press may have made but not recorded. */
@@ -96,7 +102,7 @@ let exportSchema = z.object({
 	 * back before its issue is closed takes the issue back.
 	 */
 	removed: z.array(z.object({ task: z.string().min(1).max(128), issue: refSchema }).strict())
-		.max(MAX_EXPORTED_TASKS)
+		.max(MAX_PENDING_CLOSES)
 		.optional(),
 	tasks: z.record(z.string().min(1).max(128), entrySchema).refine(
 		tasks => Object.keys(tasks).length <= MAX_EXPORTED_TASKS,
@@ -571,7 +577,15 @@ async function run(
 				if (!back) return true;
 				if (!back.issue) back.issue = item.issue;
 				return false;
-			}).slice(-MAX_EXPORTED_TASKS);
+			});
+			// Every one still needs closing; dropping one would leave its issue open for good.
+			if (removed.length > MAX_PENDING_CLOSES) {
+				throw new GitHubError(
+					`${removed.length} issues of removed tasks are still waiting to be closed; `
+						+ "fix what stops GitHub closing them, then try again",
+					409,
+				);
+			}
 			plan.issues = {
 				...expected,
 				by: input.by,

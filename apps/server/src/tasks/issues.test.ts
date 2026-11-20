@@ -9,6 +9,7 @@ import {
 	exportIssues,
 	issueLinks,
 	issuesSnapshot,
+	MAX_PENDING_CLOSES,
 	parentIssue,
 	READ_ONLY_ISSUES,
 	RECOVERY_FAILED,
@@ -623,6 +624,42 @@ describe("exportIssues", () => {
 			expect(notices.at(-1)?.text).toBe(
 				"@test closed 1 issue of tasks removed from the document under [#1](https://github.com/owner/repository/issues/1).",
 			);
+		} finally {
+			await Service.close(context.plan);
+		}
+	});
+
+	test("a press that would leave more issues waiting to close than are kept is refused, and drops none", async () => {
+		let { context, exportContext, input } = await drafted();
+		try {
+			await exportIssues(exportContext(fakeGitHub().github), input());
+			let graph = context.plan.graph!.versions.at(-1)!;
+			let revised = await implementationGraphs().revise(context.plan, {
+				planRevision: 0,
+				graphRevision: graph.revision,
+				operations: [{ op: "remove", id: "ui" }],
+			});
+			if (!revised.ok) throw new Error(`graph refused: ${revised.reason}`);
+			// Earlier closes all failed: as many issues already wait as an export keeps.
+			let waiting = Array.from({ length: MAX_PENDING_CLOSES }, (_, index) => ({
+				task: `gone-${index}`,
+				issue: {
+					id: 10_000 + index,
+					number: 1_000 + index,
+					url: `https://github.com/owner/repository/issues/${1_000 + index}`,
+				},
+			}));
+			context.plan.issues = { ...context.plan.issues!, removed: waiting };
+			let before = structuredClone(context.plan.issues);
+			let version = context.plan.graph!.versions.at(-1)!;
+			let github = fakeGitHub();
+			await expect(exportIssues(exportContext(github.github), {
+				...input(),
+				graphNumber: version.number,
+				graphRevision: version.revision,
+			})).rejects.toThrow("still waiting to be closed");
+			expect(context.plan.issues).toEqual(before);
+			expect(github.calls).toEqual([]);
 		} finally {
 			await Service.close(context.plan);
 		}
