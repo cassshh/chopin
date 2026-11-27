@@ -310,7 +310,9 @@ headers.
 - For public web research (`/research` with `WEB_RESEARCH` on), GitHub's Copilot
   MCP endpoint must offer its `web_search` tool to each user's App user access
   token. GitHub does not document that tool's requirements, so verify it on your
-  deployment; see [Troubleshooting](#troubleshooting).
+  deployment; see [Troubleshooting](#troubleshooting). Alternatively,
+  `WEB_SEARCH_PROVIDER=gemini` answers web search with Gemini's Google Search
+  grounding on `GEMINI_API_KEY`; see [Web search with Gemini](#web-search-with-gemini).
 
 ## Register the GitHub App
 
@@ -406,6 +408,8 @@ the image.
 | `CHAT_ATTACHMENT_MAX_TOTAL_BYTES` | `4194304`               | The most the files of one Chat message may total, in bytes, a whole number from 1 to 67108864 that is at least `CHAT_ATTACHMENT_MAX_BYTES`. Under `HARNESS=remote` it is never more than 1048576.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `TRANSCRIPTION_MODEL`             | off                     | `off`, or `openai/<model>` such as `openai/gpt-transcribe`, OpenAI's current transcription model. Where it is set, every person dictates through it, in every browser, and the browser's own speech recognition is never used: the composer records on their device and, when they stop, sends the recording to this server, which sends it to OpenAI with `OPENAI_API_KEY` and sends the words back as OpenAI writes them (every model but `whisper-1` streams them). Where it is off no audio is ever accepted or sent anywhere, and the microphone button is offered only to browsers that recognize speech on the device. Needs `OPENAI_API_KEY`.             |
 | `TRANSCRIPTION_MAX_BYTES`         | `5242880`               | The longest recording the server takes for `TRANSCRIPTION_MODEL`, in bytes, a whole number from 1 to 26214400. The composer stops recording by itself before it reaches this, transcribes what it has and says so; the default is several minutes of speech. A recording is kept only as long as the provider takes to answer.                                                                                                                                                                                                                                                                                                                                    |
+| `WEB_SEARCH_PROVIDER`             | `copilot`               | Who answers public web research's `web_search`: `copilot`, GitHub's Copilot MCP tool with each person's token, or `gemini`, Gemini with Google Search grounding on `GEMINI_API_KEY`. See [Web search with Gemini](#web-search-with-gemini).                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `WEB_SEARCH_MODEL`                | `gemini-3.8-flash`      | The Gemini model `WEB_SEARCH_PROVIDER=gemini` asks. Must support Google Search grounding.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `RESEARCH_EVIDENCE_TIMEOUT_MS`    | `600000`                | Deadline of one public-web research evidence attempt in milliseconds, an integer between 120000 and 1800000. Web search calls take up to about two minutes each; the attempt budgets at most four calls against what remains of this deadline. The job retries once after a failed attempt.                                                                                                                                                                                                                                                                                                                                                                       |
 | `COPILOT_CLI_PATH`                | automatic               | Advanced override for the Copilot CLI executable. Applies only to the `copilot-sdk` adapter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `CONVERSATION_PLAN`               | off                     | Set exactly `on` to enable experimental conversation-derived cards. Interpretation runs independently of `AGENT`; Planner jobs still obey the agent and job settings.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -413,7 +417,7 @@ the image.
 | `DECISIONS_TIMEOUT_MS`            | `30000`                 | Per-request decisions timeout in milliseconds, an integer between 100 and 60000.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `OPENAI_API_KEY`                  | unset                   | OpenAI API key for `openai-decisions/gpt-6-luna`. Server-only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `JEV_API_KEY`                     | unset                   | TypeSafe API key for `typesafe/jev-latest`. Server-only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `GEMINI_API_KEY`                  | unset                   | Gemini API key for `google-decisions/gemini-decision-1`. Server-only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `GEMINI_API_KEY`                  | unset                   | Gemini API key for `google-decisions/gemini-decision-1`, and for web search under `WEB_SEARCH_PROVIDER=gemini`. Server-only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `CONNECTOR_VERSION`               | the bundled connector's | The `chopin` release this server recommends: `chopin update` installs it by default, and a refused connector is told to run `chopin update <version>` with it. Defaults to the version in `apps/connector/package.json`. A `cli-v` or `v` prefix is dropped; anything but a version like `0.2.0` fails startup.                                                                                                                                                                                                                                                                                                                                                   |
 | `CHOPIN_SETUP_AGENTS`             | unset                   | Setups the Machines page offers before the built-in coding agents, as a JSON array. See [Setup agents](#setup-agents). The supplied Compose file forwards it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `CHOPIN_BUILD_RESUME_MS`          | `600000`                | How long after it starts the server waits for a paired machine to come back and carry on with a build it was running before a restart or deploy, in milliseconds, an integer between 1000 and 3600000. Until then the build stays running and its agent's calls are answered `unavailable`; after it, a build no machine took back ends as disconnected. A machine that registered again without its build has one minute, whatever this is. The connector stops an agent after 10 minutes without reaching Chopin, so a much longer window mostly keeps a build nobody will resume showing as running.                                                           |
@@ -490,6 +494,40 @@ openssl rand -hex 32
 
 The image expects to listen on internal port 8787. Do not override `PORT` in the
 supplied image without also replacing its health check and container routing.
+
+### Web search with Gemini
+
+Public web research (`/research`, and Research on a decision) normally searches with GitHub's
+Copilot MCP `web_search` tool, called with each person's own GitHub token. Where GitHub does not
+offer that tool to your accounts, set `WEB_SEARCH_PROVIDER=gemini` to answer `web_search` with
+Gemini and Google Search grounding instead:
+
+```bash
+WEB_SEARCH_PROVIDER=gemini
+GEMINI_API_KEY=...
+#WEB_SEARCH_MODEL=gemini-3.8-flash
+```
+
+The research worker sees the same tool, with the same per-attempt budget (at most four calls, each
+timed out) and the same rule that it may cite only URLs the search returned. Gemini names its
+sources by `vertexaisearch.cloud.google.com` redirect links; Chopin asks Google for each one once,
+without following it, reads the HTTPS page it redirects to, and offers that URL as the citable
+source, leaving out any it cannot resolve. The server never requests the page itself. Only these
+sources count: the answer text can't add a citable URL. A grounded answer usually takes seconds rather than GitHub's minutes.
+
+Know what changes with it:
+
+- **The credential is the deployment's, not the person's.** Every admitted writer's searches run
+  on `GEMINI_API_KEY` and count against its project's quota and billing. The person's GitHub
+  research authorization is still checked before each call.
+- **Queries go to Google.** The worker sends the questions it derives from the research brief, so
+  a brief's wording can reach Google Search. With `WEB_SEARCH_PROVIDER=copilot` it reaches GitHub
+  instead.
+- **Google's terms for grounding apply** to how results are used and shown; check them for your
+  deployment.
+
+The startup line names the provider: `web research: on (Gemini Google Search, gemini-3.8-flash,
+on GEMINI_API_KEY)`.
 
 ### Setup agents
 
@@ -1051,7 +1089,15 @@ Check the log line first, then the account's Copilot entitlement and the setting
 search and MCP servers for the user and, in an organization, its Copilot policies. No Chopin
 setting sends a different credential to this endpoint. If setup keeps failing, set
 `WEB_RESEARCH=off` to stop offering public web research until you have verified it, and report
-the log line, which holds no token.
+the log line, which holds no token. Where the endpoint withholds `web_search` from your accounts
+(for example, an organization's Copilot policy turns off "Copilot can search the web"),
+`WEB_SEARCH_PROVIDER=gemini` searches without it; see [Web search with Gemini](#web-search-with-gemini).
+
+**Gemini web search fails.** A Gemini call that fails is logged by its status alone, as
+`chopin: web_search failed - local:request:gemini:http:429`. A 429 means the key's project has no
+Google Search grounding quota left (or none at all: check it in Google AI Studio); a 404 that the
+model in `WEB_SEARCH_MODEL` is not offered to the key; a 400 or 403 that the key is invalid or
+restricted.
 
 **MCP returns 401 or 403.** A 401 indicates an invalid or expired bearer. A 403
 indicates failed instance admission or a supplied Origin that differs from

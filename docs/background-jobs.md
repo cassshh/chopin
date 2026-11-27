@@ -519,9 +519,11 @@ returning output that matches its `output` schema.
 
 ### Public research worker
 
-Only the public evidence agent binds a host `web_search` tool, reached through
-`createMCPClient` against GitHub MCP's `web_search` toolset, and lists it as
-its only `activeTools` entry. Never give one agent both private document
+Only the public evidence agent binds a host `web_search` tool, and lists it as
+its only `activeTools` entry. It is reached through `createMCPClient` against
+GitHub MCP's `web_search` toolset, or, under `WEB_SEARCH_PROVIDER=gemini`,
+through Gemini's Google Search grounding (`harness/gemini-search.ts`); both share
+one budget, timeout and failure path (`budgetedWebSearch` in `harness/web-search.ts`). Never give one agent both private document
 context and public web capability.
 
 The public evidence worker receives only the submitted brief. An isolated
@@ -532,9 +534,14 @@ analysis.
 
 Accepted public sources must be canonical public HTTPS URLs observed in
 successful web-search citation or typed-resource metadata. Bare URLs in model
-prose do not establish provenance. Chopin never follows, resolves, or fetches a
-source URL, and generated reports may cite only URLs retained in normalized
-evidence. This validates provenance, not factual accuracy or page safety.
+prose do not establish provenance. Chopin never fetches a source page, and
+generated reports may cite only URLs retained in normalized evidence. The one
+exception to resolving a URL is Gemini's: under `WEB_SEARCH_PROVIDER=gemini`,
+each grounding link Google returns (`vertexaisearch.cloud.google.com/grounding-api-redirect/…`)
+is requested once from Google, without following the redirect, and the HTTPS
+`Location` it answers becomes the source URL. No request reaches the destination
+page. Gemini's answer text is labelled so it can never parse as JSON, so only
+those resolved grounding sources establish provenance. This validates provenance, not factual accuracy or page safety.
 
 ### Executor-owned limits
 

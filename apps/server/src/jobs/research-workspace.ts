@@ -3,6 +3,7 @@ import * as limits from "@chopin/dialect/limits";
 
 import { NAMES_AS_WRITTEN } from "../agent/identity";
 import { WEB_SEARCH_MAX_CALLS, WebSearchTimeoutError, webSearchTool } from "../harness/web-search";
+import { geminiSearchTool } from "../harness/gemini-search";
 import { JobExecutionError } from "./registry";
 import { openWorkerSession, workerModel, type WorkerSession } from "./worker-session";
 import type { WebSearchFailureDiagnostic } from "../harness/web-search";
@@ -156,7 +157,9 @@ export type ResearchAnswerEngines = {
 };
 
 export type ResearchEvidenceOptions = {
-	config: Pick<Config, "agent" | "model" | "researchEvidenceTimeoutMs">;
+	config:
+		& Pick<Config, "agent" | "model" | "researchEvidenceTimeoutMs">
+		& Partial<Pick<Config, "webSearch">>;
 	engine?: ResearchEvidenceEngine;
 };
 
@@ -719,6 +722,7 @@ export function observedWebSourceUrls(result: unknown): string[] {
 export function publicResearchFailureReason(err: unknown): string {
 	let message = err instanceof Error ? err.message : "";
 	return message.includes("capability audit") || message.includes("MCP")
+			|| message.includes("Gemini web_search")
 		? "web-search-unavailable"
 		: "public-research-failed";
 }
@@ -863,8 +867,10 @@ async function classified<T>(operation: () => Promise<T>, reason: string): Promi
 	}
 }
 
+type StageConfig = Pick<Config, "agent" | "model"> & Partial<Pick<Config, "webSearch">>;
+
 async function stage(
-	config: Pick<Config, "agent" | "model">,
+	config: StageConfig,
 	execution: JobExecution<ResearchEvidenceInput | ResearchAnswerInput>,
 	kind: "public" | "private" | "report" | "answer",
 	instructions: string,
@@ -933,7 +939,7 @@ async function stage(
 		if (publicWeb) {
 			diagnose("connecting-web");
 			await execution.progress("web-setup", "started");
-			let loading = webSearchTool(credential, {
+			let searchDeps = {
 				budget: { deadline: execution.deadline },
 				onRefused: () => {
 					metrics.webRefused++;
@@ -945,9 +951,12 @@ async function stage(
 					aborted: () => abortSignal.aborted,
 					diagnose,
 					progress: (name, state) => execution.progress(name, state),
-					abort: error => toolFailure.abort(error),
+					abort: (error: JobExecutionError) => toolFailure.abort(error),
 				}),
-			});
+			};
+			let loading = config.webSearch?.provider === "gemini"
+				? geminiSearchTool(credential, config.webSearch, searchDeps)
+				: webSearchTool(credential, searchDeps);
 			try {
 				web = await Promise.race([loading, aborted]);
 			} catch (err) {
@@ -1035,9 +1044,7 @@ async function stage(
 	}
 }
 
-function defaultEvidenceEngine(
-	config: Pick<Config, "agent" | "model">,
-): ResearchEvidenceEngine {
+function defaultEvidenceEngine(config: StageConfig): ResearchEvidenceEngine {
 	return async (execution, query) => {
 		try {
 			return verifiableEvidence(publicEvidence(
