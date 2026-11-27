@@ -21,7 +21,7 @@ import {
 import { CONNECTOR_PROTOCOL } from "../apps/connector/src/version";
 import { compiledChopin } from "../apps/connector/src/testing/binary";
 import { assets, fakeRelease } from "../apps/connector/src/testing/release";
-import { setupCommand } from "../apps/web/src/experiments/setup-commands";
+import { connectorScriptCommand, setupCommand } from "../apps/web/src/experiments/setup-commands";
 import { authenticate, expect, test } from "./room";
 import { RELEASE } from "./release";
 import { ROOT } from "./servers";
@@ -194,22 +194,49 @@ test("your computer: one copied command installs chopin, which pairs only a mach
 
 	await addMachine(page, "Local", true);
 	let dialog = page.getByRole("dialog", { name: "Add a local machine", exact: true });
-	await expect(dialog).toContainText(`connect as @${handle}.`);
+	await expect(dialog).toContainText(`Connect it as @${handle}.`);
 	let origin = new URL(baseURL!).origin;
+	let version = (await (await page.request.get("/api/connector/version")).json()).version as string;
 	let command = () => dialog.locator(".machines-run pre code").innerText();
 	await dialog.getByRole("button", { name: "Linux", exact: true }).click();
 	let picker = dialog.getByRole("combobox", { name: "Coding agent", exact: true });
 	await expect(picker).toHaveValue("copilot");
 	// The built-in agents, Copilot CLI first.
 	await expect(picker.locator("option")).toHaveText(["GitHub Copilot CLI", "Atomic"]);
-	await expect.poll(command).toBe(setupCommand(origin, "sh", findAgent("copilot")));
+	// By default this server's own connector runs in the terminal; no service is installed.
+	let service = dialog.getByRole("switch", { name: "Install as a service", exact: true });
+	await expect(service).toHaveAttribute("aria-checked", "false");
+	await expect.poll(command).toBe(connectorScriptCommand(origin, findAgent("copilot")));
+	await expect.poll(command).not.toContain("--install-service");
+	// Windows has no connector command: the release this server recommends, in the terminal.
 	await dialog.getByRole("button", { name: "Windows", exact: true }).click();
-	await expect.poll(command).toBe(setupCommand(origin, "powershell", findAgent("copilot")));
+	await expect.poll(command).toBe(
+		setupCommand(origin, "powershell", findAgent("copilot"), { background: false, version }),
+	);
 	await picker.selectOption({ label: "Atomic" });
-	await expect.poll(command).toBe(setupCommand(origin, "powershell", findAgent("atomic")));
+	await expect.poll(command).toBe(
+		setupCommand(origin, "powershell", findAgent("atomic"), { background: false, version }),
+	);
 	await picker.selectOption({ label: "GitHub Copilot CLI" });
+	// A Mac always runs this server's connector: the released chopin has no microVMs for it, so
+	// there is no service to choose.
 	await dialog.getByRole("button", { name: "macOS", exact: true }).click();
-	await expect.poll(command).toBe(setupCommand(origin, "sh", findAgent("copilot")));
+	await expect.poll(command).toBe(connectorScriptCommand(origin, findAgent("copilot")));
+	await expect(service).toBeDisabled();
+	await expect(service).toHaveAttribute("aria-checked", "false");
+	await expect(dialog.getByText(/^The released chopin has no microVMs for a Mac yet/))
+		.toBeVisible();
+	await expect(dialog.getByText(/it downloads the microVMs' package for a Mac/)).toBeVisible();
+	// On Linux, opting in installs that release as the service.
+	await dialog.getByRole("button", { name: "Linux", exact: true }).click();
+	await service.click();
+	await expect(service).toHaveAttribute("aria-checked", "true");
+	await expect.poll(command).toBe(
+		setupCommand(origin, "sh", findAgent("copilot"), { background: true, version }),
+	);
+	await service.click();
+	await expect.poll(command).toBe(connectorScriptCommand(origin, findAgent("copilot")));
+	await dialog.getByRole("button", { name: "macOS", exact: true }).click();
 
 	// What the machine needs reads as one line: chopin installs the agent in its microVMs, which
 	// on a Mac are Apple Virtualization's.
@@ -232,9 +259,12 @@ test("your computer: one copied command installs chopin, which pairs only a mach
 	await expect(dialog.getByText("It prints a link; open it here and approve.")).toBeVisible();
 	await expect(dialog.getByText(/Waiting/)).toHaveCount(0);
 
-	// Pasted on a machine that can't run microVMs, as a CI runner without KVM can't: it installs chopin,
-	// which says what the machine needs and pairs nothing. Pairing a machine that runs microVMs is
-	// the connector's own tests' to show.
+	// This test installs chopin as the service: the opt-in.
+	await service.click();
+	await expect(service).toHaveAttribute("aria-checked", "true");
+	// Pasted on a machine that can't run microVMs, as a CI runner without KVM can't: it installs
+	// chopin, which says what the machine needs and pairs nothing. Pairing a machine that runs
+	// microVMs is the connector's own tests' to show.
 	test.skip(
 		canRunMicrovms(),
 		"This machine can run microVMs, which this test pastes the command on.",
@@ -318,14 +348,21 @@ test("server or VM: a generated script with its single-use key, which pairs only
 	await expect.poll(async () => (await shown()).key).not.toBe(first);
 	let { text: command, key } = await shown();
 	let origin = new URL(baseURL!).origin;
+	let version = (await (await page.request.get("/api/connector/version")).json()).version as string;
+	// The installer is pinned to the release this server recommends.
 	expect(command).toBe(
-		setupCommand(origin, "sh", findAgent("copilot"), { key: key!, name: "ci-runner" }),
+		setupCommand(origin, "sh", findAgent("copilot"), { key: key!, name: "ci-runner", version }),
 	);
+	expect(command).toContain(` CHOPIN_VERSION=${version} `);
 	expect(command).toContain(" connect --name ci-runner --install-service ");
 	await page.getByRole("button", { name: "Windows", exact: true }).click();
 	await expect.poll(async () => (await shown()).text)
 		.toBe(
-			setupCommand(origin, "powershell", findAgent("copilot"), { key: key!, name: "ci-runner" }),
+			setupCommand(origin, "powershell", findAgent("copilot"), {
+				key: key!,
+				name: "ci-runner",
+				version,
+			}),
 		);
 	await page.getByRole("button", { name: "Linux", exact: true }).click();
 	// The key stays out of the address and the browser's storage.

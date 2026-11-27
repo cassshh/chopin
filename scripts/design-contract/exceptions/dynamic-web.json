@@ -312,7 +312,7 @@
 				1
 			]
 		],
-		"sourceHash": "cd494d828f9f1fd36f671c47615a9808d9e43b9de30be8157e07c21be4464c06"
+		"sourceHash": "6efbe423784ed12a18e97622c8a88fb502f35ef8dc7741d62c4973269eba7c66"
 	},
 	{
 		"file": "apps/web/src/experiments/machines.tsx",
@@ -326,7 +326,7 @@
 				1
 			]
 		],
-		"sourceHash": "2fdfc9e79346e700d4465f129d7661e8802ec76a9edb7b350f1e2010dfb1e07c"
+		"sourceHash": "a94365985a2aee4353f2bf26710e84613c2eecb02eb35f27b563b70edd13043f"
 	},
 	{
 		"file": "apps/web/src/ai-accounts/rows.tsx",

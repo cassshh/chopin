@@ -35,8 +35,10 @@ In Chopin, open **Machines** and choose **Add machine**. It offers two ways:
   nobody opens a browser on it.
 
 Either way you copy one command and run it in a terminal on that machine, in
-any folder. The installer installs `chopin`, then runs `chopin connect` itself. If the install
-fails, it stops with its own message and runs nothing.
+any folder. The installer installs the `chopin` release this server recommends, then runs
+`chopin connect` itself; on a local machine the default instead runs this server's own
+connector (see [Local](#local)). If the install fails, it stops with its own message and runs
+nothing.
 
 The machine needs Linux or Windows on x86_64 with hardware virtualization, or a
 Mac on Apple silicon (experimental, see [Apple Virtualization](vz-sandbox.md)): the
@@ -48,23 +50,44 @@ its own and installs it there (see [Coding agents](#coding-agents) and
 
 ### Local
 
-Pick the system and your coding agent. On Linux the command looks like this:
+Pick the system and your coding agent. **Install as a service** is off by default.
+Off, on Linux or macOS, the command downloads the connector this Chopin server serves
+and runs it with [Bun](https://bun.sh) in your terminal, until you press Ctrl-C:
+
+```sh
+mkdir -p ~/.chopin && curl -fsSL https://your-chopin-instance.example/connector.js -o ~/.chopin/connector.js && \
+  CHOPIN_URL=https://your-chopin-instance.example bun --no-env-file --config=/dev/null ~/.chopin/connector.js connect --agent copilot
+```
+
+That connector is the server's own code, so it always matches the server (a
+deployment's own fixes included). It runs each agent in a microVM of its own, as
+the release does, but can't install the service.
+
+A Mac on Apple silicon always runs this connector: the released `chopin` has no
+microVMs for a Mac yet, so the switch is off there. The first time, the connector
+downloads the [Apple Virtualization](vz-sandbox.md) package it pins (about 60 MB);
+nothing else is asked of the Mac.
+
+On, the command installs the `chopin` release this server recommends (the one
+`chopin update` installs) and runs it as the [service](#keep-it-running):
 
 ```sh
 curl -fsSL https://github.com/githubnext/chopin/releases/latest/download/install.sh | \
-  CHOPIN_URL=https://your-chopin-instance.example sh -s -- connect --install-service --agent copilot
+  CHOPIN_URL=https://your-chopin-instance.example CHOPIN_VERSION=0.0.45 sh -s -- connect --install-service --agent copilot
 ```
 
-In PowerShell on Windows:
+PowerShell on Windows has no connector command, so there it always installs that
+release; the switch says whether it runs as the service:
 
 ```powershell
-$env:CHOPIN_URL = 'https://your-chopin-instance.example'
+$env:CHOPIN_URL = 'https://your-chopin-instance.example'; $env:CHOPIN_VERSION = '0.0.45'
 & ([scriptblock]::Create((irm https://github.com/githubnext/chopin/releases/latest/download/install.ps1))) connect --install-service --agent copilot
 ```
 
 It prints a link and a code. Open the link in the browser you're signed in to,
-check the code and approve. The machine connects, installs the service and
-appears on the page.
+check the code and approve. The machine connects, installs the service if you
+chose it, and appears on the page. An agent that asks for permission in the
+terminal can't run as the service, so the switch is off for it.
 
 ### Cloud
 

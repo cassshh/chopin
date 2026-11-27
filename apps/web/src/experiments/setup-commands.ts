@@ -122,13 +122,20 @@ export function setupCommand(
 	origin: string,
 	shell: SetupShell,
 	agent: CodingAgent,
-	{ key, background, name }: { key?: string; background?: boolean; name?: string } = {},
+	{ key, background, name, version }: {
+		key?: string;
+		background?: boolean;
+		name?: string;
+		/** The chopin release to install, as this server recommends it; the newest release if none. */
+		version?: string;
+	} = {},
 ): string {
 	let connect = connectArguments(agent, shell, background, name);
 	if (shell === "powershell") {
 		return [
 			[
 				`$env:CHOPIN_URL = ${literal(origin)}`,
+				...(version ? [`$env:CHOPIN_VERSION = ${literal(version)}`] : []),
 				...(key
 					? [`$env:CHOPIN_PAIRING_KEY = ($token = ${literal(key)})`, "Remove-Variable token"]
 					: []),
@@ -138,9 +145,24 @@ export function setupCommand(
 	}
 	let environment = [
 		`CHOPIN_URL=${quote(origin, shell)}`,
+		...(version ? [`CHOPIN_VERSION=${quote(version, shell)}`] : []),
 		...(key ? [`CHOPIN_PAIRING_KEY=${quote(key, shell)}`] : []),
 	];
 	return `curl -fsSL ${RELEASES}/install.sh | \\\n  ${environment.join(" ")} sh -s -- ${connect}`;
+}
+
+/**
+ * Downloads the connector this server serves and connects with it: the same code as the server,
+ * fixes of this deployment's included, in the terminal, with each agent in a microVM of its own as
+ * the release runs it (on a Mac, Apple Virtualization's, which only this connector has). A shell (sh) command
+ * only; Bun runs it, and must load neither the current folder's .env (it could redirect pairing)
+ * nor its bunfig.toml (it could run code).
+ */
+export function connectorScriptCommand(origin: string, agent: CodingAgent): string {
+	let url = quote(origin, "sh");
+	return `mkdir -p ~/.chopin && curl -fsSL ${url}/connector.js -o ~/.chopin/connector.js && \\\n`
+		+ `  CHOPIN_URL=${url} bun --no-env-file --config=/dev/null ~/.chopin/connector.js connect `
+		+ words(agentArguments(agent), "sh");
 }
 
 /**

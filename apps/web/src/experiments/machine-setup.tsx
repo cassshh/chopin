@@ -11,10 +11,11 @@ import { MenuItem } from "../menu-item";
 import { motionImmediately } from "../motion-input";
 import { NavigationDialog } from "../navigation-dialog";
 import { session } from "../api";
-import { useLogin } from "./machines";
+import { useLogin, useRecommendedVersion } from "./machines";
 import {
 	agentOptions,
 	chosenAgent,
+	connectorScriptCommand,
 	guessSystem,
 	isSetupAgent,
 	runsAsService,
@@ -24,8 +25,8 @@ import {
 	shellFor,
 } from "./setup-commands";
 
-import type { KeyboardEvent } from "react";
-import type { SetupAgent } from "@chopin/protocol/agents";
+import type { KeyboardEvent, ReactNode } from "react";
+import type { CodingAgent, SetupAgent } from "@chopin/protocol/agents";
 import type { NavigationDialogMotion } from "../navigation-dialog";
 import type { AgentOption, SetupShell, SetupSystem } from "./setup-commands";
 
@@ -390,8 +391,62 @@ export function AddMachineMenu(
 }
 
 /**
- * Add a local machine: install chopin and connect, with no key. The command prints a link to
- * approve in this browser; the machine then appears in the table, as in Tailscale.
+ * A setting that is on or off, as a switch at the end of its title with what it means under it.
+ * `disabled` says why it can't change.
+ */
+export function Setting(
+	{ checked, children, disabled, onChange, title }: {
+		checked: boolean;
+		children: ReactNode;
+		disabled?: ReactNode;
+		onChange: (checked: boolean) => void;
+		title: string;
+	},
+) {
+	let titleId = useId();
+	let detailId = useId();
+	return (
+		<div className="machines-setting">
+			<div className="machines-setting-head">
+				<h3 className="machines-setting-title" id={titleId}>{title}</h3>
+				<button
+					aria-checked={checked}
+					aria-describedby={detailId}
+					aria-labelledby={titleId}
+					className="machines-switch"
+					disabled={!!disabled}
+					onClick={() => onChange(!checked)}
+					role="switch"
+					type="button"
+				>
+					<span aria-hidden="true" className="machines-switch-thumb" />
+				</button>
+			</div>
+			<p className="machines-setting-detail" id={detailId}>{disabled ?? children}</p>
+		</div>
+	);
+}
+
+/** Why a Mac has no service to install: only this server's connector runs its microVMs. */
+const MAC_SERVICE =
+	"The released chopin has no microVMs for a Mac yet, so a Mac runs this server's own connector in the terminal, with Bun, until you stop it.";
+
+/** Why an agent that asks permission in the terminal can't run as the background service. */
+export function foreground(agent: CodingAgent) {
+	if (agent.unattended === true) return undefined;
+	return `${agent.name} asks for permission in the terminal, so it runs there. To run it in the background, ${agent.unattended.setting}, then use chopin connect --install-service.`;
+}
+
+/**
+ * Add a local machine: connect it with no key. The command prints a link to approve in this
+ * browser; the machine then appears in the table, as in Tailscale. By default a built-in agent
+ * connects with this server's own connector, in the terminal: the same code as the server, so a
+ * deployment's own fixes reach it, with each agent in a microVM of its own as the release runs it,
+ * but with no service. **Install as a service** instead installs the chopin release this server
+ * recommends and runs it in the background. PowerShell has no connector command of its own, so on
+ * Windows the release is installed either way, and the switch only says whether it runs as a
+ * service. A Mac always runs this server's connector: the released chopin has no microVMs for a
+ * Mac yet, so the switch is off there and says why.
  */
 export function AddComputerDialog(
 	{ motion, onDismiss }: { motion: NavigationDialogMotion; onDismiss: () => void },
@@ -399,7 +454,22 @@ export function AddComputerDialog(
 	let login = useLogin();
 	let [system, setSystem] = useSystem();
 	let { agent, options, choose } = useAgent("computer");
+	let recommended = useRecommendedVersion();
+	let [service, setService] = useState(false);
 	let shell = shellFor(system);
+	let builtIn = isSetupAgent(agent) ? undefined : agent;
+	let unattended = !!builtIn && runsAsService(builtIn);
+	let mac = system === "macos";
+	let asService = unattended && service && !mac;
+	let script = !!builtIn && !asService && shell === "sh";
+	let command = !builtIn
+		? setupAgentCommand(agent as SetupAgent, system, { origin: location.origin }) ?? ""
+		: script
+		? connectorScriptCommand(location.origin, builtIn)
+		: setupCommand(location.origin, shell, builtIn, {
+			background: asService,
+			...(recommended ? { version: recommended } : {}),
+		});
 	return (
 		<NavigationDialog
 			className="machines-computer-dialog"
@@ -414,7 +484,7 @@ export function AddComputerDialog(
 			</span>
 			<div className="machines-dialog-body">
 				<p className="machines-dialog-lead">
-					Install chopin on it and connect as {login
+					Connect it as {login
 						? <strong className="font-semibold text-text-primary">@{login}</strong>
 						: "your GitHub account"}.
 				</p>
@@ -423,19 +493,36 @@ export function AddComputerDialog(
 					<AgentChoice agent={agent} onChange={choose} options={options} />
 					<Needs agent={agent} system={system} />
 				</div>
+				{builtIn && (
+					<Setting
+						checked={asService}
+						disabled={mac ? MAC_SERVICE : foreground(builtIn)}
+						onChange={setService}
+						title="Install as a service"
+					>
+						{asService
+							? `Installs chopin${
+								recommended ? ` ${recommended}` : ""
+							}, the release this server recommends, and keeps it connected in the background after you close the terminal.`
+							: shell === "sh"
+							? "Off: runs this server's own connector in the terminal, with Bun, until you stop it. It matches this server exactly, and runs your agent in a microVM of its own, as the release does."
+							: `Off: installs chopin${
+								recommended ? ` ${recommended}` : ""
+							}, the release this server recommends, and runs it in the terminal until you stop it.`}
+					</Setting>
+				)}
 				<div className="machines-run">
 					<p className="machines-run-lead">In a terminal, run:</p>
-					<Command
-						label="setup command"
-						place={shellPlace(shell)}
-						text={isSetupAgent(agent)
-							? setupAgentCommand(agent, system, { origin: location.origin }) ?? ""
-							: setupCommand(location.origin, shell, agent)}
-					/>
-					{!isSetupAgent(agent) && (
+					<Command label="setup command" place={shellPlace(shell)} text={command} />
+					{builtIn && (
 						<p className="machines-detail">
 							It prints a link; open it here and approve.
-							{!runsAsService(agent) && " Keep the terminal open."}
+							{!asService && " Keep the terminal open; Ctrl-C disconnects."}
+							{script && " Needs Bun."}
+							{script && mac
+								&& " The first time, it downloads the microVMs' package for a Mac (about 60 MB)."}
+							{!script && builtIn.id === "copilot"
+								&& " GitHub Copilot CLI can't sign in under the released chopin yet; on Linux or macOS, turn the service off to use this server's connector."}
 						</p>
 					)}
 				</div>
