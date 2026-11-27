@@ -211,11 +211,11 @@ test("your computer: one copied command installs chopin, which pairs only a mach
 	await dialog.getByRole("button", { name: "macOS", exact: true }).click();
 	await expect.poll(command).toBe(setupCommand(origin, "sh", findAgent("copilot")));
 
-	// What the machine needs reads as one line: chopin installs the agent in its microVMs, and a
-	// Mac can't run them.
+	// What the machine needs reads as one line: chopin installs the agent in its microVMs, which
+	// on a Mac are Apple Virtualization's.
 	await expect(dialog.locator(".machines-needs")).toHaveText(
-		"A Mac can't run Chopin's work: chopin runs each agent in a microVM of its own, which needs "
-			+ "Linux or Windows on x86_64 with hardware virtualization.",
+		"Needs Apple silicon (experimental): chopin runs GitHub Copilot CLI in a microVM of its own "
+			+ "and installs it there.",
 	);
 	await dialog.getByRole("button", { name: "Windows", exact: true }).click();
 	await expect(dialog.locator(".machines-needs")).toHaveText(
@@ -232,10 +232,13 @@ test("your computer: one copied command installs chopin, which pairs only a mach
 	await expect(dialog.getByText("It prints a link; open it here and approve.")).toBeVisible();
 	await expect(dialog.getByText(/Waiting/)).toHaveCount(0);
 
-	// Pasted on a machine whose user can't use KVM, as a CI runner's can't: it installs chopin,
+	// Pasted on a machine that can't run microVMs, as a CI runner without KVM can't: it installs chopin,
 	// which says what the machine needs and pairs nothing. Pairing a machine that runs microVMs is
 	// the connector's own tests' to show.
-	test.skip(canUseKvm(), "This machine can run microVMs, which this test pastes the command on.");
+	test.skip(
+		canRunMicrovms(),
+		"This machine can run microVMs, which this test pastes the command on.",
+	);
 	let laptop = await machine();
 	try {
 		let exited = laptop.run(await command());
@@ -250,8 +253,12 @@ test("your computer: one copied command installs chopin, which pairs only a mach
 	}
 });
 
-/** Whether this process may open /dev/kvm, as a chopin it starts would. */
-function canUseKvm() {
+/**
+ * Whether a chopin this process starts could run microVMs here: it may open /dev/kvm, or this is a
+ * Mac on Apple silicon, which runs them with Apple Virtualization.
+ */
+function canRunMicrovms() {
+	if (process.platform === "darwin" && process.arch === "arm64") return true;
 	try {
 		accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
 		return true;
@@ -328,10 +335,13 @@ test("server or VM: a generated script with its single-use key, which pairs only
 	// The page ends at the command, as Tailscale's does: no wait for the machine.
 	await expect(page.getByText(/Waiting/)).toHaveCount(0);
 
-	// Pasted on a machine whose user can't use KVM, as a CI runner's can't: chopin installs, says
+	// Pasted on a machine that can't run microVMs, as a CI runner without KVM can't: chopin installs, says
 	// what the machine needs, and spends no key. Pairing one that runs microVMs is the connector's
 	// own tests' to show.
-	test.skip(canUseKvm(), "This machine can run microVMs, which this test pastes the script on.");
+	test.skip(
+		canRunMicrovms(),
+		"This machine can run microVMs, which this test pastes the script on.",
+	);
 	let server = await machine(repository);
 	try {
 		expect(await server.run(command), server.output()).not.toBe(0);

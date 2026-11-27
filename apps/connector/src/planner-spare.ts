@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -234,7 +235,30 @@ const REPOSITORY = /^[\w.-]+\/[\w.-]+$/;
 /** The machine's memory in bytes: all of it, and what is available now. */
 export type Memory = () => { total: number; available: number };
 
-const MEMORY: Memory = () => ({ total: totalmem(), available: freemem() });
+/**
+ * What macOS could give a new process now, in bytes, from `vm_stat`'s output: its free pages and
+ * those it would take back first (inactive, speculative and purgeable). `freemem()` counts only the
+ * free ones there, a few hundred MB on a Mac with most of its memory to give, where Linux counts
+ * what is available. Undefined for output that isn't `vm_stat`'s.
+ */
+export function macAvailable(text: string): number | undefined {
+	let page = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
+	let pages = (name: string) => Number(new RegExp(`^${name}:\\s+(\\d+)\\.`, "m").exec(text)?.[1]);
+	let free = pages("Pages free");
+	if (!Number.isFinite(page) || !Number.isFinite(free)) return undefined;
+	let reclaimable = ["Pages inactive", "Pages speculative", "Pages purgeable"]
+		.map(pages).filter(Number.isFinite).reduce((sum, count) => sum + count, 0);
+	return (free + reclaimable) * page;
+}
+
+const MEMORY: Memory = () => {
+	let available = freemem();
+	if (process.platform === "darwin") {
+		let stat = spawnSync("vm_stat", { encoding: "utf8", timeout: 5_000 });
+		if (stat.status === 0) available = macAvailable(stat.stdout) ?? available;
+	}
+	return { total: totalmem(), available };
+};
 
 /**
  * How many spares a machine keeps: `cap`, and no more than take `MEMORY_SHARE` of its memory at

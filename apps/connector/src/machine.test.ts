@@ -954,3 +954,22 @@ test("while its agents run in microVMs here, every request for a credential or w
 		"/api/connector/connections": said,
 	});
 });
+
+test("a Mac's connector says its agents run in Apple Virtualization microVMs", async () => {
+	let seen: Array<Record<string, string>> = [];
+	let server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch(request) {
+			seen.push(sandboxHeaders(request.headers));
+			return Response.json({});
+		},
+	});
+	cleanup.push(() => server.stop(true));
+	runAgentsIn("vz");
+	cleanup.push(() => runAgentsIn(undefined));
+	await machineAiLaunch(`http://127.0.0.1:${server.port}`, MACHINE_TOKEN, "run").catch(() => {});
+	expect(seen).toEqual([
+		{ "chopin-connector-sandbox": "vz", "chopin-connector-sandbox-hypervisor": "vz" },
+	]);
+});

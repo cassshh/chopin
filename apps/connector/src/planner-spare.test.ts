@@ -19,7 +19,7 @@ import { checkouts, clonePath } from "./checkouts";
 import { createOutput } from "./output";
 import { servePlanners } from "./planner";
 import { type LaunchGate, launchGate } from "./launch-gate";
-import { type Memory, plannerSpares, READY_LINE, SPARE_BYTES } from "./planner-spare";
+import { macAvailable, type Memory, plannerSpares, READY_LINE, SPARE_BYTES } from "./planner-spare";
 import { git, plannerDisks, plannerSlot, type SpareState } from "./workspace";
 
 /**
@@ -1196,3 +1196,17 @@ test.skipIf(process.platform === "win32")(
 	},
 	60_000,
 );
+
+test("a Mac's available memory counts what macOS would take back, not only its free pages", () => {
+	let stat = [
+		"Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+		"Pages free:                                    30193.",
+		"Pages active:                                 528908.",
+		"Pages inactive:                               526518.",
+		"Pages speculative:                               661.",
+		"Pages wired down:                             260208.",
+		"Pages purgeable:                                4471.",
+	].join("\n");
+	expect(macAvailable(stat)).toBe((30193 + 526518 + 661 + 4471) * 16384);
+	expect(macAvailable("vm_stat: command not found")).toBeUndefined();
+});

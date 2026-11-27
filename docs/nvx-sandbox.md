@@ -33,13 +33,15 @@ wrote.
 
 ## Machines that can run it
 
-| Host                         | Needs                                                                                                     |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Linux, x86_64                | Read and write access to `/dev/kvm` (KVM) or `/dev/mshv` (Microsoft Hypervisor), for the connector's user |
-| Windows, x86_64              | The Windows Hypervisor Platform turned on                                                                 |
-| macOS, any Arm64 host, other | Not supported: refused at pairing and connect                                                             |
+| Host                           | Needs                                                                                                     |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Linux, x86_64                  | Read and write access to `/dev/kvm` (KVM) or `/dev/mshv` (Microsoft Hypervisor), for the connector's user |
+| Windows, x86_64                | The Windows Hypervisor Platform turned on                                                                 |
+| macOS, Apple silicon           | Apple Virtualization instead of NVX (experimental, see [Apple Virtualization](vz-sandbox.md))             |
+| Linux or Windows on Arm, other | Not supported: refused at pairing and connect                                                             |
 
-NVX boots x86_64 guests only and has no macOS backend. The check
+NVX boots x86_64 guests only and has no macOS backend; a Mac on Apple silicon runs
+the same microVMs with Apple's Virtualization framework instead. The check
 (`nvxSupport` in `apps/connector/src/nvx.ts`) reads the platform, the
 architecture and whether the connector's user may read and write the hypervisor's
 device. A Linux machine whose `/dev/kvm` belongs to a group the user isn't in is
@@ -90,8 +92,8 @@ whose WHP is off fails its first microVM, which says so.
   what it said, as above. Pairing and the routes that hand out nothing still answer
   older connectors, so they can update.
 - **Add machine** on the Machines page says what a machine needs (KVM, or the
-  Windows Hypervisor Platform, on x86_64) instead of the agent's host install, and
-  that a Mac can't run Chopin's work.
+  Windows Hypervisor Platform, on x86_64, or Apple silicon on a Mac) instead of the
+  agent's host install.
 
 A machine that loses what NVX needs while connected (logind takes back the access to
 `/dev/kvm` a desktop login gave its user, the user leaves the `kvm` group, WHP is
@@ -666,7 +668,8 @@ microVMs (2 to 8) boot at once; the rest wait their turn (see
 - the agent start checks outside the sandbox: `chopin connect` and
   `chopin service install` check the agent in a microVM of its image;
 - the host's agent install and its Node.js version check: the image has its own;
-- macOS and Arm64 machines.
+- macOS and Arm64 machines under NVX (a Mac on Apple silicon has its own engine since,
+  see [Apple Virtualization](vz-sandbox.md)).
 
 `--sandbox-host` stays (the proxy's allow-list). `--sandbox-write` stays, as a
 writable share. `--sandbox-hide` stays, inside a share. `--install`,

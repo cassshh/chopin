@@ -38,11 +38,12 @@ Either way you copy one command and run it in a terminal on that machine, in
 any folder. The installer installs `chopin`, then runs `chopin connect` itself. If the install
 fails, it stops with its own message and runs nothing.
 
-The machine needs Linux or Windows on x86_64 with hardware virtualization: the
+The machine needs Linux or Windows on x86_64 with hardware virtualization, or a
+Mac on Apple silicon (experimental, see [Apple Virtualization](vz-sandbox.md)): the
 agent isn't installed or signed in on it, because `chopin` runs it in a microVM of
 its own and installs it there (see [Coding agents](#coding-agents) and
-[Sandbox](#sandbox)). A Mac or an Arm machine can install `chopin`, but can't run
-Chopin's work. Your server may list its own
+[Sandbox](#sandbox)). An Intel Mac or a Linux or Windows Arm machine can install
+`chopin`, but can't run Chopin's work. Your server may list its own
 [setup agents](self-hosting.md#setup-agents) first, each with its own steps.
 
 ### Local
@@ -1107,7 +1108,10 @@ Node.js and git.
 restart). Windows hosts are not yet ready for work: what is left is in
 [Agents in NVX microVMs](nvx-sandbox.md#windows).
 
-**macOS** and **Arm** machines can't run Chopin's work: NVX boots x86_64 guests
+**macOS** on Apple silicon runs the same microVMs with Apple's Virtualization
+framework instead of NVX, which has no macOS backend (experimental; `chopin`
+installs its package itself, see [Apple Virtualization](vz-sandbox.md)). An **Intel Mac**
+and **Linux or Windows on Arm** can't run Chopin's work: NVX boots x86_64 guests
 under KVM, MSHV or WHP, none of which they have. `chopin` installs on them, and
 says so when it would pair or connect.
 
@@ -1259,7 +1263,7 @@ Each message says what to run next. The first line of each:
 | `could not download`                                | Check your connection and any proxy (`HTTPS_PROXY`), then run the command again.                                                                                                                                                                  |
 | `… isn't writable by you`                           | Run `sudo chown -R "$(id -un)" "$HOME/.local"`, then run the command again.                                                                                                                                                                       |
 | `… is not on your PATH`                             | Add the line the installer prints to your shell profile. The setup command runs `chopin` by its full path.                                                                                                                                        |
-| `This machine can't run Chopin's work`              | Do what its `Fix:` line says, such as joining the `kvm` group, then run the command again. A Mac or an Arm machine can't be one of Chopin's machines; use a Linux or Windows x86_64 machine.                                                      |
+| `This machine can't run Chopin's work`              | Do what its `Fix:` line says, such as joining the `kvm` group, then run the command again. An Intel Mac or a Linux or Windows Arm machine can't be one of Chopin's machines; use a Linux or Windows x86_64 machine, or a Mac on Apple silicon.    |
 | `chopin runs … in a microVM of its own`             | Add `--install '<the command that installs it>'` (or `--planner-install` for a Planner command), then run the command again.                                                                                                                      |
 | `… isn't inside a git checkout`                     | Give `--checkout` the folder of a clone from GitHub, or leave it out and `chopin` clones each repository as work needs it.                                                                                                                        |
 | `… isn't a github.com repository`                   | Check `git remote -v`; Chopin connects clones of GitHub repositories.                                                                                                                                                                             |

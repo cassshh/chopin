@@ -14,8 +14,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	buildScript,
 	ensureImages,
+	guestPackages,
 	type ImageBuilder,
+	imageEnvironment,
 	imageKey,
 	type ImageRecipe,
 	imageStore,
@@ -458,5 +461,40 @@ describe("launches that ask for an image while it is made", () => {
 		expect(attempts).toBe(1);
 		await store.image("my-planner");
 		expect(attempts).toBe(2);
+	});
+});
+
+describe("images of an architecture", () => {
+	let recipe: ImageRecipe = { name: "a", install: ["npm install -g a"], programs: ["a"] };
+	let user = { uid: 501, gid: 20 };
+
+	test("an x86_64 image's key is what it was before arm64 images existed", () => {
+		expect(imageKey(recipe, "layer", user, undefined, "x64")).toBe(imageKey(recipe, "layer", user));
+		expect(imageKey(recipe, "layer", user, undefined, "arm64")).not.toBe(
+			imageKey(recipe, "layer", user),
+		);
+	});
+
+	test("an arm64 image finds its libraries where arm64 Ubuntu has them", () => {
+		let script = buildScript(recipe, user, "00000000-0000-4000-8000-000000000000", "arm64");
+		expect(script).toContain("/usr/lib/aarch64-linux-gnu");
+		expect(script).not.toContain("x86_64");
+		expect(imageEnvironment("arm64").environment.LD_LIBRARY_PATH).toBe(
+			"/opt/chopin/agent/sys/usr/lib/aarch64-linux-gnu:/opt/chopin/agent/sys/lib/aarch64-linux-gnu",
+		);
+		expect(imageEnvironment().environment.LD_LIBRARY_PATH).toContain("x86_64-linux-gnu");
+	});
+
+	test("each architecture's packages are its own, and git and erofs-utils are among them", () => {
+		for (let arch of ["x64", "arm64"] as const) {
+			let { guest, build } = guestPackages(arch);
+			let suffix = arch === "arm64" ? "_arm64.deb" : "_amd64.deb";
+			for (let item of [...guest, ...build]) {
+				expect(item.path.endsWith(suffix) || item.path.endsWith("_all.deb")).toBe(true);
+				expect(item.sha256).toMatch(/^[0-9a-f]{64}$/);
+			}
+			expect(guest.map(item => item.name)).toContain("git");
+			expect(build.map(item => item.name)).toContain("erofs-utils");
+		}
 	});
 });

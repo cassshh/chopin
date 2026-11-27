@@ -5,11 +5,15 @@ import { pipeline } from "node:stream/promises";
 import { builtInRecipe, imageName, type ImageRecipe } from "./images";
 import {
 	guestProgram,
+	type Hypervisor,
 	installNvx,
+	installVz,
 	NVX_RELEASE,
+	type NvxArtifacts,
 	nvxSupport,
 	programAt,
 	type SupportHost,
+	VZ_RELEASE,
 } from "./nvx";
 import type { Output } from "./output";
 import {
@@ -158,9 +162,27 @@ export async function openMachineSandbox(options: {
 }): Promise<Sandbox> {
 	let support = nvxSupport(options.host ?? systemSupportHost());
 	if (!support.supported) throw new MachineUnsupported(support);
-	let { output, recipes } = options;
+	let { output } = options;
+	let open = (artifacts: NvxArtifacts, hypervisor: Hypervisor) =>
+		createFor(options, artifacts, hypervisor);
 	let artifacts = installedArtifacts(options.directory);
 	if (!artifacts) {
+		if (support.package === "darwin-vz") {
+			output.say(
+				output.style.dim(
+					`… Installing chopin's Apple Virtualization package ${VZ_RELEASE.version}, the microVMs agents run in (about 130 MB, once).`,
+				),
+			);
+			let shown = 0;
+			let installed = await installVz(options.directory, download, unpack, bytes => {
+				let megabytes = Math.floor(bytes / 1024 / 1024 / 25) * 25;
+				if (megabytes > shown) {
+					shown = megabytes;
+					output.say(output.style.dim(`  ${megabytes} MB`));
+				}
+			});
+			return open(installed, support.hypervisor);
+		}
 		output.say(
 			output.style.dim(
 				`… Installing NVX ${NVX_RELEASE.version}, the microVMs agents run in (about 275 MB, once).`,
@@ -182,11 +204,21 @@ export async function openMachineSandbox(options: {
 			},
 		);
 	}
+	return open(artifacts, support.hypervisor);
+}
+
+/** The sandbox on `artifacts`, with every image its launches need built. */
+function createFor(
+	options: Parameters<typeof openMachineSandbox>[0],
+	artifacts: NvxArtifacts,
+	hypervisor: Hypervisor,
+): Promise<Sandbox> {
+	let { output, recipes } = options;
 	return createSandbox({
 		directory: options.directory,
 		server: options.server,
 		...options.settings ? { settings: options.settings } : {},
-		setup: { artifacts, hypervisor: support.hypervisor },
+		setup: { artifacts, hypervisor },
 		recipes,
 		building: recipes => output.say(output.style.dim(`… ${buildingWords(recipes)}`)),
 		waiting: recipes =>

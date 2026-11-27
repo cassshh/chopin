@@ -31,6 +31,7 @@ import {
 	CONNECTOR_UPDATE_REQUIRED,
 	CONNECTOR_VERSION_HEADER,
 	parseSandboxReport,
+	runsMicrovms,
 	SANDBOX_TEXT_LIMIT,
 } from "@chopin/protocol/connector";
 import type { Session } from "@chopin/protocol";
@@ -407,7 +408,7 @@ function compatible(
 function microvmsOnly(request: Request, origin: string, recommended: string | undefined) {
 	if (protocolOf(request) >= NVX_PROTOCOL) {
 		let sandbox = parseSandboxReport(name => request.headers.get(name) ?? undefined);
-		if (sandbox?.engine === "nvx") return;
+		if (runsMicrovms(sandbox)) return;
 		fail(
 			"microvm-required",
 			`This machine can't run Chopin's work: Chopin runs each agent in its own microVM. ${
@@ -1691,7 +1692,7 @@ export function registerExperimentRoutes(router: Router, auth: HostedAuth, optio
 		// either is kept on the machine, as `/api/connector/capability` keeps it, so the Machines page
 		// says why while it is away.
 		let older = protocolOf(request) < NVX_PROTOCOL;
-		if (older || about.sandbox?.engine !== "nvx") {
+		if (older || !runsMicrovms(about.sandbox)) {
 			let release = releaseVersion(request);
 			let problem = older
 				? {

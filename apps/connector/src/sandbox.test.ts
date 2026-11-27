@@ -342,7 +342,7 @@ describe.skipIf(process.platform === "win32")("starting a launch's microVM", () 
 				signal: null,
 				out: "",
 				err: "This machine can't run Chopin's work: Chopin runs each agent in its own microVM, "
-					+ `which needs Linux or Windows on x86_64 with hardware virtualization. ${reason} `
+					+ `which needs Linux or Windows on x86_64 with hardware virtualization, or a Mac on Apple silicon. ${reason} `
 					+ `Fix: ${fix} (OpenVMM: failed to open file \`/dev/kvm\`: Permission denied (os `
 					+ "error 13))\n",
 			});

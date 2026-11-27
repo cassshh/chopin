@@ -437,7 +437,7 @@ test("a machine that can't run microVMs is told what it needs and the fix, and p
 	expect(refused.code).toBe(1);
 	expect(refused.stderr).toContain(
 		"This machine can't run Chopin's work: Chopin runs each agent in its own microVM, which needs "
-			+ "Linux or Windows on x86_64 with hardware virtualization. Your user can't read and write "
+			+ "Linux or Windows on x86_64 with hardware virtualization, or a Mac on Apple silicon. Your user can't read and write "
 			+ "/dev/kvm.",
 	);
 	expect(refused.stderr).toContain("Fix: sudo usermod -aG kvm $USER");
@@ -1022,7 +1022,7 @@ test.skipIf(process.platform === "win32")(
 			// Chopin keeps why, for its Machines page, and chopin says it.
 			expect(told).toEqual({ reason, fix });
 			expect(stderr).toContain(
-				`Chopin runs each agent in its own microVM, which needs Linux or Windows on x86_64 with hardware virtualization. ${reason}\nFix: ${fix}`,
+				`Chopin runs each agent in its own microVM, which needs Linux or Windows on x86_64 with hardware virtualization, or a Mac on Apple silicon. ${reason}\nFix: ${fix}`,
 			);
 			// It left, and started no Planner nor connected again until its user could open /dev/kvm.
 			let from = seen.indexOf("told");

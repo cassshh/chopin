@@ -27,15 +27,44 @@ export const NVX_RELEASE = {
 } as const;
 
 export type NvxPackage = keyof typeof NVX_RELEASE.packages;
-export type Hypervisor = "kvm" | "mshv" | "whp";
+/**
+ * What runs a machine's microVMs: NVX on KVM, the Microsoft Hypervisor or the Windows Hypervisor
+ * Platform, or, on a Mac on Apple silicon, Apple's Virtualization framework (`vz`, through the
+ * `chopin-vz` helper, which takes `nvx sandbox run`'s words; see docs/vz-sandbox.md).
+ */
+export type Hypervisor = "kvm" | "mshv" | "whp" | "vz";
 
-/** What every refusal of a machine that can't run NVX starts with. */
+/**
+ * chopin's Apple Virtualization package (`apps/connector/vz`): its helper, kernel, initramfs and
+ * base layer, as one archive `build.sh --archive` made, published as a release asset and pinned
+ * here by its SHA-256, as NVX's packages are. A package is never rebuilt in place: a change to the
+ * helper or the guest is a new version, a new asset and a new pin. `CHOPIN_VZ_ROOT` names one built
+ * locally instead.
+ */
+export const VZ_RELEASE = {
+	version: "0.1.0",
+	tag: "vz-v0.1.0",
+	file: "chopin-vz-0.1.0-darwin-arm64.tar.gz",
+	sha256: "57fcc30d1f53357753ad83ece1b83b5e96f6e3b1c8f0c992f8489ca515feea08",
+} as const;
+
+/** An Apple Virtualization package as pinned: its version, its release's tag, its archive and SHA-256. */
+export type VzRelease = { version: string; tag: string; file: string; sha256: string };
+
+/** Where a pinned Apple Virtualization package is downloaded from. */
+export function vzPackageUrl(release: VzRelease = VZ_RELEASE) {
+	return `https://github.com/cassshh/chopin/releases/download/${release.tag}/${release.file}`;
+}
+
+/** What every refusal of a machine that can't run microVMs starts with. */
 export const UNSUPPORTED_LEAD = "This machine can't run Chopin's work: Chopin runs each agent in "
-	+ "its own microVM, which needs Linux or Windows on x86_64 with hardware virtualization.";
+	+ "its own microVM, which needs Linux or Windows on x86_64 with hardware virtualization, or a "
+	+ "Mac on Apple silicon.";
 
-/** Whether this machine can run NVX, and if not why, with the one fix where there is one. */
+/** Whether this machine can run microVMs, and if not why, with the one fix where there is one. */
 export type NvxSupport =
-	| { supported: true; hypervisor: Hypervisor; package: NvxPackage }
+	| { supported: true; hypervisor: Exclude<Hypervisor, "vz">; package: NvxPackage }
+	| { supported: true; hypervisor: "vz"; package: "darwin-vz" }
 	| { supported: false; reason: string; fix?: string };
 
 /** What the support check reads of the machine; tests give it a made-up one. */
@@ -70,10 +99,22 @@ export function unsupportedWords(support: Extract<NvxSupport, { supported: false
  */
 export function nvxSupport(host: SupportHost): NvxSupport {
 	if (host.platform === "darwin") {
-		return {
-			supported: false,
-			reason: "macOS has no hypervisor NVX can use, so a Mac can't be one of Chopin's machines.",
-		};
+		// NVX has no macOS backend; Apple's Virtualization framework runs arm64 Linux guests instead.
+		if (host.arch !== "arm64") {
+			return {
+				supported: false,
+				reason: "chopin runs microVMs on a Mac with Apple's Virtualization framework, which it "
+					+ `supports on Apple silicon only, and this Mac is ${host.arch}.`,
+			};
+		}
+		if (host.uid === 0) {
+			return {
+				supported: false,
+				reason: "chopin runs as root here, and a microVM's agent can't run as root.",
+				fix: "Run chopin as your own user",
+			};
+		}
+		return { supported: true, hypervisor: "vz", package: "darwin-vz" };
 	}
 	if (host.platform !== "linux" && host.platform !== "win32") {
 		return { supported: false, reason: `NVX doesn't run on ${host.platform}.` };
@@ -175,7 +216,11 @@ export type NvxArtifacts = {
  * distro layer with its manifest, which names the layer's UUID. Undefined when any is missing.
  */
 export function artifactsAt(root: string, platform: NodeJS.Platform): NvxArtifacts | undefined {
-	let nvx = join(root, "bin", platform === "win32" ? "nvx.exe" : "nvx");
+	let nvx = join(
+		root,
+		"bin",
+		platform === "win32" ? "nvx.exe" : platform === "darwin" ? "chopin-vz" : "nvx",
+	);
 	let layer = join(root, "guest", "ubuntu-distro.erofs");
 	let manifest = `${layer}.manifest.json`;
 	if (!existsSync(nvx) || !existsSync(layer) || !existsSync(manifest)) return undefined;
@@ -194,6 +239,11 @@ export function artifactsAt(root: string, platform: NodeJS.Platform): NvxArtifac
 /** Where the pinned NVX release is extracted in the connector's state directory. */
 export function nvxDirectory(base: string) {
 	return join(base, "nvx", NVX_RELEASE.version);
+}
+
+/** Where an installed Apple Virtualization package is in the connector's state directory. */
+export function vzDirectory(base: string, version: string = VZ_RELEASE.version) {
+	return join(base, "vz", version);
 }
 
 /** Where the pinned package is downloaded from: Chopin's release copy, else NVX's own release. */
@@ -247,6 +297,20 @@ export function staleReleases(base: string): string[] {
 /** Removes the NVX releases the connector no longer pins. */
 export function removeStaleReleases(base: string) {
 	for (let path of staleReleases(base)) rmSync(path, { recursive: true, force: true });
+}
+
+/** Versions of the Apple Virtualization package in `<base>/vz` other than the pinned one. */
+export function staleVzReleases(base: string, version: string = VZ_RELEASE.version): string[] {
+	let parent = join(base, "vz");
+	let names: string[];
+	try {
+		names = readdirSync(parent);
+	} catch {
+		return [];
+	}
+	return names
+		.filter(name => /^\d+\.\d+\.\d+/.test(name) && name !== version)
+		.map(name => join(parent, name));
 }
 
 /** A host path the guest sees, at the guest path. */
@@ -906,6 +970,67 @@ export async function installNvx(
 	}
 	removeStaleReleases(base);
 	return artifactsAt(target, platform)!;
+}
+
+/**
+ * Installs the pinned Apple Virtualization package into `<base>/vz/<version>`: downloaded, its
+ * SHA-256 checked against the pin, unpacked, each of its files checked against the package's own
+ * `SHA256SUMS`, then made the installed package in one rename. One that fails any check is removed
+ * and nothing is installed. Older versions go once the pinned one is in.
+ */
+export async function installVz(
+	base: string,
+	fetchTo: Fetcher,
+	unpack: Unpacker,
+	progress?: (bytes: number) => void,
+	release: VzRelease = VZ_RELEASE,
+): Promise<NvxArtifacts> {
+	let { mkdir, rename, rm, writeFile } = await import("node:fs/promises");
+	let target = vzDirectory(base, release.version);
+	let work = `${target}.installing-${randomSuffix()}`;
+	await mkdir(work, { recursive: true, mode: 0o700 });
+	try {
+		let archive = join(work, release.file);
+		try {
+			await fetchTo(vzPackageUrl(release), archive, progress);
+		} catch (error) {
+			throw new Error(
+				`Couldn't download chopin's Apple Virtualization package ${release.version}: ${
+					error instanceof Error ? error.message : String(error)
+				}. To use one built on this Mac instead, run apps/connector/vz/build.sh from a Chopin checkout.`,
+				{ cause: error },
+			);
+		}
+		let digest = createHash("sha256").update(readFileSync(archive)).digest("hex");
+		if (digest !== release.sha256) {
+			throw new Error(
+				`The Apple Virtualization package downloaded isn't the one this chopin pins (SHA-256 ${digest}), so nothing was installed.`,
+			);
+		}
+		let root = join(work, "unpacked");
+		await mkdir(root);
+		await unpack(archive, root);
+		let problems = checkSums(root);
+		if (problems.length) {
+			throw new Error(
+				`The Apple Virtualization package's files don't match its SHA256SUMS: ${
+					problems.slice(0, 3).join(", ")
+				}`,
+			);
+		}
+		if (!artifactsAt(root, "darwin")) {
+			throw new Error("The Apple Virtualization package has no chopin-vz or no Ubuntu layer.");
+		}
+		await writeFile(join(root, ".verified"), `${release.version}\n`);
+		await rm(target, { recursive: true, force: true });
+		await rename(root, target);
+	} finally {
+		await rm(work, { recursive: true, force: true });
+	}
+	for (let path of staleVzReleases(base, release.version)) {
+		rmSync(path, { recursive: true, force: true });
+	}
+	return artifactsAt(target, "darwin")!;
 }
 
 function randomSuffix() {

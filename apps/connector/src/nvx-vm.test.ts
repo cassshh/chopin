@@ -55,10 +55,16 @@ function kvm() {
 		return false;
 	}
 }
-let artifacts = process.env.CHOPIN_NVX_ROOT
-	? artifactsAt(process.env.CHOPIN_NVX_ROOT, "linux")
+// On a Mac on Apple silicon they run in Apple Virtualization microVMs instead, where CHOPIN_VZ_ROOT
+// names a package `apps/connector/vz/build.sh` made (see docs/vz-sandbox.md).
+let vz = process.platform === "darwin" && process.arch === "arm64" && process.env.CHOPIN_VZ_ROOT
+	? artifactsAt(process.env.CHOPIN_VZ_ROOT, "darwin")
 	: undefined;
-let usable = process.platform === "linux" && kvm() && !!artifacts;
+let artifacts = vz ?? (process.env.CHOPIN_NVX_ROOT
+	? artifactsAt(process.env.CHOPIN_NVX_ROOT, "linux")
+	: undefined);
+let hypervisor = vz ? "vz" as const : "kvm" as const;
+let usable = !!vz || process.platform === "linux" && kvm() && !!artifacts;
 if (!usable) {
 	// CI's microVM job sets CHOPIN_NVX_REQUIRED, so a runner that lost KVM fails rather than skips.
 	if (process.env.CHOPIN_NVX_REQUIRED) {
@@ -76,7 +82,9 @@ if (usable && !strace && process.env.CHOPIN_NVX_REQUIRED) {
 	throw new Error("The microVM tests need strace to make a start fail.");
 }
 
-let scratch = mkdtempSync(join(tmpdir(), "chopin-nvx-vm-"));
+// Where it really is: a Mac's temporary directory is named through a link, and a guest has paths
+// only where they really are.
+let scratch = realpathSync(mkdtempSync(join(tmpdir(), "chopin-nvx-vm-")));
 let base = process.env.CHOPIN_NVX_TEST_BASE ?? join(scratch, "state");
 let sandbox: Sandbox;
 let chopin: ReturnType<typeof Bun.serve>;
@@ -194,7 +202,7 @@ beforeAll(async () => {
 	sandbox = await createSandbox({
 		directory: base,
 		server: `http://127.0.0.1:${chopin.port}`,
-		setup: { artifacts: artifacts!, hypervisor: "kvm" },
+		setup: { artifacts: artifacts!, hypervisor },
 		recipes: new Map([
 			["bash", { ...recipe, programs: ["bash"] }],
 			[
@@ -541,7 +549,8 @@ describe.skipIf(!usable)("an agent in its microVM", () => {
 			let [name] = readdirSync(launches);
 			let { run } = JSON.parse(readFileSync(join(launches, name!, "launch.json"), "utf8"));
 			// nvx keeps a folder in the temporary directory, which it leaves when ended by force.
-			expect(readdirSync(run)).toContain("openvmm.log");
+			// Apple Virtualization's helper keeps none the connector knows of.
+			if (!vz) expect(readdirSync(run)).toContain("openvmm.log");
 			let group = child.pid!;
 			let members = () =>
 				spawnSync("ps", ["-o", "pid=", "-g", String(group)], { encoding: "utf8" }).stdout.trim();
@@ -551,7 +560,7 @@ describe.skipIf(!usable)("an agent in its microVM", () => {
 			while (members() && Date.now() - ended < 5_000) await Bun.sleep(100);
 			expect(members()).toBe("");
 			await closed;
-			expect(existsSync(run)).toBe(false);
+			if (!vz) expect(existsSync(run)).toBe(false);
 			expect(readdirSync(launches)).toEqual([]);
 		},
 		120_000,
@@ -664,7 +673,7 @@ describe.skipIf(!usable)("an agent in its microVM", () => {
 		expect(lines).not.toContain(secret);
 		await new Promise(resolve => child.once("close", resolve));
 		expect(out.trim()).toBe(secret);
-		expect(readFileSync("/proc/self/status", "utf8")).toBeTruthy();
+		if (!vz) expect(readFileSync("/proc/self/status", "utf8")).toBeTruthy();
 	}, 120_000);
 });
 

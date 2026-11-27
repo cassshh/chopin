@@ -60,6 +60,7 @@ import {
 	unsupportedWords,
 	type VmSpec,
 	vmSpec,
+	vzDirectory,
 } from "./nvx";
 import { allowedHosts, type SandboxSettings, validAllowedEntry } from "./sandbox-policy";
 import { type Proxy, startProxy } from "./sandbox-proxy";
@@ -1096,16 +1097,20 @@ export async function createSandbox(options: SandboxOptions): Promise<Sandbox> {
 		...options.unsupported ? { unsupported: options.unsupported } : {},
 		...options.host ? { host: options.host } : {},
 	};
+	// Apple Virtualization boots arm64 guests; NVX boots x86_64 ones.
+	let arch = setup.hypervisor === "vz" ? "arm64" as const : "x64" as const;
 	let images: ImageStore;
 	try {
 		images = await imageStore(options.recipes, {
 			base: directory,
 			layer: setup.artifacts.layer.uuid,
 			user: guestUser(),
+			arch,
 			builder: options.builder ?? vmBuilder({
 				base: directory,
 				layer: setup.artifacts.layer,
 				user: guestUser(),
+				arch,
 				run: spec => runVm(spec, setup, directory, vm),
 				download: options.download ?? fetchTo,
 				proxyPort: proxy.port,
@@ -1122,7 +1127,7 @@ export async function createSandbox(options: SandboxOptions): Promise<Sandbox> {
 		throw error;
 	}
 	return {
-		report: { engine: "nvx", hypervisor: setup.hypervisor },
+		report: reportOf(setup.hypervisor),
 		spawn(launch) {
 			let program = guestProgram(
 				launch.command[programAt(launch.command)] ?? "",
@@ -1184,10 +1189,22 @@ export function installedArtifacts(
 	env: Record<string, string | undefined> = process.env,
 	platform = process.platform,
 ): NvxArtifacts | undefined {
+	if (platform === "darwin") {
+		// The Apple Virtualization package, built with apps/connector/vz/build.sh.
+		let root = env.CHOPIN_VZ_ROOT;
+		if (root) return artifactsAt(root, platform);
+		let at = vzDirectory(directory);
+		return existsSync(join(at, ".verified")) ? artifactsAt(at, platform) : undefined;
+	}
 	let root = env.CHOPIN_NVX_ROOT;
 	if (root) return artifactsAt(root, platform);
 	let at = nvxDirectory(directory);
 	return existsSync(join(at, ".verified")) ? artifactsAt(at, platform) : undefined;
+}
+
+/** What Chopin hears of microVMs on `hypervisor`: NVX's, or Apple Virtualization's. */
+export function reportOf(hypervisor: Hypervisor): SandboxReport {
+	return hypervisor === "vz" ? { engine: "vz", hypervisor } : { engine: "nvx", hypervisor };
 }
 
 /**
@@ -1197,7 +1214,7 @@ export function installedArtifacts(
 export function machineReport(host: SupportHost = systemSupportHost()): SandboxReport {
 	let support = nvxSupport(host);
 	return support.supported
-		? { engine: "nvx", hypervisor: support.hypervisor }
+		? reportOf(support.hypervisor)
 		: { engine: "none", reason: support.reason, ...support.fix ? { fix: support.fix } : {} };
 }
 

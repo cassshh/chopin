@@ -56,26 +56,42 @@ export const CONNECTOR_SANDBOX_REASON_HEADER = "chopin-connector-sandbox-reason"
 export const CONNECTOR_SANDBOX_FIX_HEADER = "chopin-connector-sandbox-fix";
 export const CONNECTOR_STORE_PROBLEM_HEADER = "chopin-connector-store-problem";
 
-/** The hypervisors NVX boots its microVMs on, and what people call them. */
+/**
+ * The hypervisors a connector boots its microVMs on, and what people call them: NVX's, and Apple's
+ * Virtualization framework (`vz`), on which a Mac on Apple silicon runs them.
+ */
 export const HYPERVISORS = {
 	kvm: "KVM",
 	mshv: "Microsoft Hypervisor",
 	whp: "Windows Hypervisor Platform",
+	vz: "Apple Virtualization",
 } as const;
 export type HypervisorName = keyof typeof HYPERVISORS;
 
-/** What a connector says about where its agents run: NVX microVMs, or `none` with why not. */
+/**
+ * What a connector says about where its agents run: NVX microVMs, Apple Virtualization microVMs
+ * (`vz`, on a Mac), or `none` with why not.
+ */
 export type SandboxReport =
-	| { engine: "nvx"; hypervisor: HypervisorName }
+	| { engine: "nvx"; hypervisor: Exclude<HypervisorName, "vz"> }
+	| { engine: "vz"; hypervisor: "vz" }
 	| { engine: "none"; reason: string; fix?: string };
+
+/** Whether a connector that says `report` runs each agent in a microVM of its own. */
+export function runsMicrovms(
+	report: SandboxReport | undefined,
+): report is Exclude<SandboxReport, { engine: "none" }> {
+	return report?.engine === "nvx" || report?.engine === "vz";
+}
 
 /** The longest reason and fix a server keeps. */
 export const SANDBOX_TEXT_LIMIT = 600;
 
 /** "Each agent in its own microVM (NVX on KVM)", or "Can't run agents: <reason>". */
 export function sandboxSummary(report: SandboxReport): string {
-	return report.engine === "none"
-		? `Can't run agents: ${report.reason}`
+	if (report.engine === "none") return `Can't run agents: ${report.reason}`;
+	return report.engine === "vz"
+		? `Each agent in its own microVM (${HYPERVISORS.vz})`
 		: `Each agent in its own microVM (NVX on ${HYPERVISORS[report.hypervisor]})`;
 }
 
@@ -93,8 +109,13 @@ export function parseSandboxReport(
 	let engine = header(CONNECTOR_SANDBOX_HEADER);
 	if (engine === "nvx") {
 		let hypervisor = header(CONNECTOR_SANDBOX_HYPERVISOR_HEADER);
-		return hypervisor && Object.hasOwn(HYPERVISORS, hypervisor)
-			? { engine, hypervisor: hypervisor as HypervisorName }
+		return hypervisor && hypervisor !== "vz" && Object.hasOwn(HYPERVISORS, hypervisor)
+			? { engine, hypervisor: hypervisor as Exclude<HypervisorName, "vz"> }
+			: undefined;
+	}
+	if (engine === "vz") {
+		return header(CONNECTOR_SANDBOX_HYPERVISOR_HEADER) === "vz"
+			? { engine, hypervisor: "vz" }
 			: undefined;
 	}
 	if (engine !== "none") return undefined;
