@@ -292,7 +292,7 @@ test("an unfixed emoji is read by the classifier's Choice alone, and approval ea
 	await h.clock.advance(DEBOUNCE_MS + 100);
 	await flush();
 	expect(h.requests).toHaveLength(1);
-	expect(Object.keys(h.requests[0]!.questions)).toEqual(["intent:r0"]);
+	expect(Object.keys(h.requests[0]!.questions)).toEqual(["intent_r0"]);
 	expect(h.prompts).toEqual([]);
 });
 
@@ -401,7 +401,7 @@ test("reactions read together go to the classifier in one request", async () => 
 	await h.clock.advance(DEBOUNCE_MS + 100);
 	await flush();
 	expect(h.requests).toHaveLength(1);
-	expect(Object.keys(h.requests[0]!.questions)).toEqual(["intent:r0", "intent:r1"]);
+	expect(Object.keys(h.requests[0]!.questions)).toEqual(["intent_r0", "intent_r1"]);
 	await until(() => h.prompts.length === 1);
 	await finishTurn(h);
 	await until(() => h.prompts.length === 2);

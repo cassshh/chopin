@@ -38,7 +38,7 @@ You need these prerequisites on your machine:
 - Docker Engine with Docker Compose for PostgreSQL
 - A GitHub App owned by your local deployment
 - A GitHub account with push or administration access to a test repository, plus an active Copilot entitlement for the default Planner
-- An `OPENAI_API_KEY` or `JEV_API_KEY` for the decisions model required when `AGENT=on`
+- An `OPENAI_API_KEY`, `JEV_API_KEY` or `GEMINI_API_KEY` for the decisions model required when `AGENT=on`
 
 ### 1. Register a GitHub App
 
@@ -75,7 +75,7 @@ cp .env.example .env
 openssl rand -hex 32
 ```
 
-Open `.env` and fill in `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `SESSION_ENCRYPTION_KEY` from the generated hexadecimal string, and either `OPENAI_API_KEY` or `JEV_API_KEY`.
+Open `.env` and fill in `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `SESSION_ENCRYPTION_KEY` from the generated hexadecimal string, and one of `OPENAI_API_KEY`, `JEV_API_KEY` or `GEMINI_API_KEY`.
 
 To run without the Planner, background jobs, or a decisions key, set `AGENT=off`. That setting leaves the `/mcp` endpoint enabled for external coding agents.
 
@@ -147,7 +147,7 @@ The **Machines** page at `/machines` on your server generates one install-and-co
 - **Authentication and access.** Every browser participant signs in with GitHub, passes the optional instance admission policy, and needs repository access through the GitHub App installation. A public repository does not make its Chopin documents public. Pull access views documents; push or administration access creates documents, edits them, and invokes the Planner. MCP callers pass instance admission and authorize repositories directly with their own bearer token without an App installation. See [Authentication](docs/authentication.md) and [Repository channels](docs/channels.md).
 - **Data sent to model providers.** Document content, Chat messages, and repository excerpts selected by the Planner go to the configured model provider. That provider is GitHub Copilot under `copilot-sdk`, the `HARNESS_AUTH` provider under `HARNESS=atomic`, or the attached client under `HARNESS=remote`. Background jobs send job-specific material to isolated workers on the same adapter. Public web research sends only the submitted brief, though the worker may refine search queries.
 - **Credentials and storage.** Hosted GitHub credentials are encrypted in PostgreSQL with `SESSION_ENCRYPTION_KEY`, stored outside the database. [Local device mode](docs/authentication.md#local-device-flow-sign-in) instead stores credentials in an OS vault or a consented local file. Documents, transcripts, decisions, research staging, background jobs, and sessions live in PostgreSQL. See [Storage](docs/storage.md) and [Hosted agent](docs/hosted-agent.md).
-- **Decisions model and opt-in settings.** When `AGENT=on`, Chopin requires a decisions model set through `OPENAI_API_KEY`, `JEV_API_KEY`, or `DECISIONS_MODEL` for group turn-taking and Planner reply checks. Conversation-derived decision cards and [research offers](docs/conversation-research.md) are off by default; `CONVERSATION_PLAN=on` enables them, even with `AGENT=off`. See [Self-hosting](docs/self-hosting.md#runtime-configuration).
+- **Decisions model and opt-in settings.** When `AGENT=on`, Chopin requires a decisions model set through `OPENAI_API_KEY`, `JEV_API_KEY`, `GEMINI_API_KEY`, or `DECISIONS_MODEL` for group turn-taking and Planner reply checks. Conversation-derived decision cards and [research offers](docs/conversation-research.md) are off by default; `CONVERSATION_PLAN=on` enables them, even with `AGENT=off`. See [Self-hosting](docs/self-hosting.md#runtime-configuration).
 - **Single active writer.** One Chopin process may write to a database at a time, and horizontal scaling is not supported. A deploy can overlap two processes on one database with `HANDOVER=wait`; see [Deploys nobody can see](docs/zero-downtime-deploys.md).
 
 ## Documentation
