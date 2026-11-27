@@ -5,6 +5,7 @@ import {
 	CONNECTOR_SANDBOX_HYPERVISOR_HEADER,
 	CONNECTOR_SANDBOX_REASON_HEADER,
 	parseSandboxReport,
+	runsMicrovms,
 	SANDBOX_TEXT_LIMIT,
 	sandboxLabel,
 	sandboxSummary,
@@ -21,6 +22,33 @@ test("a machine is labelled with the hypervisor its microVMs run on", () => {
 	expect(sandboxLabel({ engine: "nvx", hypervisor: "whp" })).toBe(
 		"Each agent in its own microVM (NVX on Windows Hypervisor Platform)",
 	);
+});
+
+test("a Mac's microVMs are Apple Virtualization's, which runs them as NVX's do", () => {
+	let report = { engine: "vz" as const, hypervisor: "vz" as const };
+	expect(sandboxLabel(report)).toBe("Each agent in its own microVM (Apple Virtualization)");
+	expect(runsMicrovms(report)).toBe(true);
+	expect(runsMicrovms({ engine: "nvx", hypervisor: "kvm" })).toBe(true);
+	expect(runsMicrovms({ engine: "none", reason: "No /dev/kvm." })).toBe(false);
+	expect(runsMicrovms(undefined)).toBe(false);
+	expect(
+		parseSandboxReport(
+			headers({ [CONNECTOR_SANDBOX_HEADER]: "vz", [CONNECTOR_SANDBOX_HYPERVISOR_HEADER]: "vz" }),
+		),
+	).toEqual(report);
+	// Apple Virtualization is never NVX's hypervisor, and its engine names no other.
+	for (
+		let [engine, hypervisor] of [["nvx", "vz"], ["vz", "kvm"], ["vz", ""]] as const
+	) {
+		expect(
+			parseSandboxReport(
+				headers({
+					[CONNECTOR_SANDBOX_HEADER]: engine,
+					...hypervisor ? { [CONNECTOR_SANDBOX_HYPERVISOR_HEADER]: hypervisor } : {},
+				}),
+			),
+		).toBeUndefined();
+	}
 });
 
 test("a machine that can't run agents says why and the one fix", () => {

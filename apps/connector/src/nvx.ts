@@ -27,15 +27,28 @@ export const NVX_RELEASE = {
 } as const;
 
 export type NvxPackage = keyof typeof NVX_RELEASE.packages;
-export type Hypervisor = "kvm" | "mshv" | "whp";
+/**
+ * What runs a machine's microVMs: NVX on KVM, the Microsoft Hypervisor or the Windows Hypervisor
+ * Platform, or, on a Mac on Apple silicon, Apple's Virtualization framework (`vz`, through the
+ * `chopin-vz` helper, which takes `nvx sandbox run`'s words; see docs/vz-sandbox.md).
+ */
+export type Hypervisor = "kvm" | "mshv" | "whp" | "vz";
 
-/** What every refusal of a machine that can't run NVX starts with. */
+/**
+ * The version of chopin's Apple Virtualization package (`apps/connector/vz`): its helper, kernel,
+ * initramfs and base layer. It is built locally for now and named with `CHOPIN_VZ_ROOT`.
+ */
+export const VZ_RELEASE = { version: "0.1.0-dev" } as const;
+
+/** What every refusal of a machine that can't run microVMs starts with. */
 export const UNSUPPORTED_LEAD = "This machine can't run Chopin's work: Chopin runs each agent in "
-	+ "its own microVM, which needs Linux or Windows on x86_64 with hardware virtualization.";
+	+ "its own microVM, which needs Linux or Windows on x86_64 with hardware virtualization, or a "
+	+ "Mac on Apple silicon.";
 
-/** Whether this machine can run NVX, and if not why, with the one fix where there is one. */
+/** Whether this machine can run microVMs, and if not why, with the one fix where there is one. */
 export type NvxSupport =
-	| { supported: true; hypervisor: Hypervisor; package: NvxPackage }
+	| { supported: true; hypervisor: Exclude<Hypervisor, "vz">; package: NvxPackage }
+	| { supported: true; hypervisor: "vz"; package: "darwin-vz" }
 	| { supported: false; reason: string; fix?: string };
 
 /** What the support check reads of the machine; tests give it a made-up one. */
@@ -70,10 +83,22 @@ export function unsupportedWords(support: Extract<NvxSupport, { supported: false
  */
 export function nvxSupport(host: SupportHost): NvxSupport {
 	if (host.platform === "darwin") {
-		return {
-			supported: false,
-			reason: "macOS has no hypervisor NVX can use, so a Mac can't be one of Chopin's machines.",
-		};
+		// NVX has no macOS backend; Apple's Virtualization framework runs arm64 Linux guests instead.
+		if (host.arch !== "arm64") {
+			return {
+				supported: false,
+				reason: "chopin runs microVMs on a Mac with Apple's Virtualization framework, which it "
+					+ `supports on Apple silicon only, and this Mac is ${host.arch}.`,
+			};
+		}
+		if (host.uid === 0) {
+			return {
+				supported: false,
+				reason: "chopin runs as root here, and a microVM's agent can't run as root.",
+				fix: "Run chopin as your own user",
+			};
+		}
+		return { supported: true, hypervisor: "vz", package: "darwin-vz" };
 	}
 	if (host.platform !== "linux" && host.platform !== "win32") {
 		return { supported: false, reason: `NVX doesn't run on ${host.platform}.` };
@@ -175,7 +200,11 @@ export type NvxArtifacts = {
  * distro layer with its manifest, which names the layer's UUID. Undefined when any is missing.
  */
 export function artifactsAt(root: string, platform: NodeJS.Platform): NvxArtifacts | undefined {
-	let nvx = join(root, "bin", platform === "win32" ? "nvx.exe" : "nvx");
+	let nvx = join(
+		root,
+		"bin",
+		platform === "win32" ? "nvx.exe" : platform === "darwin" ? "chopin-vz" : "nvx",
+	);
 	let layer = join(root, "guest", "ubuntu-distro.erofs");
 	let manifest = `${layer}.manifest.json`;
 	if (!existsSync(nvx) || !existsSync(layer) || !existsSync(manifest)) return undefined;
@@ -194,6 +223,11 @@ export function artifactsAt(root: string, platform: NodeJS.Platform): NvxArtifac
 /** Where the pinned NVX release is extracted in the connector's state directory. */
 export function nvxDirectory(base: string) {
 	return join(base, "nvx", NVX_RELEASE.version);
+}
+
+/** Where an installed Apple Virtualization package is in the connector's state directory. */
+export function vzDirectory(base: string) {
+	return join(base, "vz", VZ_RELEASE.version);
 }
 
 /** Where the pinned package is downloaded from: Chopin's release copy, else NVX's own release. */

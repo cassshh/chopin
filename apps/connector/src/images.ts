@@ -21,15 +21,45 @@ import {
 	type GuestPackage,
 	UBUNTU_ARCHIVE,
 } from "./guest-packages";
+import { ARM64_BUILD_PACKAGES, ARM64_GUEST_PACKAGES } from "./guest-packages-arm64";
 import { type AgentImage, IMAGE_GUEST_PATH, NVX_RELEASE, type VmSpec } from "./nvx";
 import { holds, processStart, staleLock, type StartProbe } from "./workspace";
 
-/** The Node.js every image runs its agent on: the 24 line, pinned by version and SHA-256. */
-export const NODE_RELEASE = {
-	version: "24.22.3",
-	file: "node-v24.22.3-linux-x64.tar.gz",
-	sha256: "061ec3e3062115705b56b51fa9cc330ab50d34b6969387d4e4b1a50c6809acc2",
+/**
+ * The architecture of a machine's guests: x86_64 under NVX, arm64 under Apple Virtualization on a
+ * Mac. It picks the Node.js, Ubuntu packages and library paths an image is made of.
+ */
+export type GuestArch = "x64" | "arm64";
+
+/** The Node.js every image runs its agent on, per architecture: the 24 line, pinned by SHA-256. */
+export const NODE_RELEASES = {
+	x64: {
+		version: "24.22.3",
+		file: "node-v24.22.3-linux-x64.tar.gz",
+		sha256: "061ec3e3062115705b56b51fa9cc330ab50d34b6969387d4e4b1a50c6809acc2",
+	},
+	arm64: {
+		version: "24.22.3",
+		file: "node-v24.22.3-linux-arm64.tar.gz",
+		sha256: "261af2af250dfd7e9f25cf151d1b2713a0adf8f10a9ad116c4947f68627affe8",
+	},
 } as const;
+
+/** The x86_64 Node.js, which NVX's guests run. */
+export const NODE_RELEASE = NODE_RELEASES.x64;
+
+/** Where Debian puts an architecture's libraries. */
+const TRIPLETS: Record<GuestArch, string> = {
+	x64: "x86_64-linux-gnu",
+	arm64: "aarch64-linux-gnu",
+};
+
+/** The Ubuntu packages an image of `arch` unpacks beside Node (`guest`) and builds with (`build`). */
+export function guestPackages(arch: GuestArch) {
+	return arch === "arm64"
+		? { guest: ARM64_GUEST_PACKAGES, build: ARM64_BUILD_PACKAGES }
+		: { guest: GUEST_PACKAGES, build: BUILD_PACKAGES };
+}
 
 /** How an agent's image is made: the commands that install it, run in the build's guest. */
 export type ImageRecipe = {
@@ -80,12 +110,15 @@ const IMAGE = IMAGE_GUEST_PATH;
 const SYSTEM = `${IMAGE}/sys`;
 
 /** What every image gives its agent's guest: its programs first on PATH, and git's own paths. */
-export function imageEnvironment(): Pick<AgentImage, "path" | "environment"> {
+export function imageEnvironment(
+	arch: GuestArch = "x64",
+): Pick<AgentImage, "path" | "environment"> {
 	let certificates = `${IMAGE}/ca-certificates.crt`;
+	let triplet = TRIPLETS[arch];
 	return {
 		path: [`${IMAGE}/bin`, `${IMAGE}/node/bin`, `${SYSTEM}/usr/bin`],
 		environment: {
-			LD_LIBRARY_PATH: `${SYSTEM}/usr/lib/x86_64-linux-gnu:${SYSTEM}/lib/x86_64-linux-gnu`,
+			LD_LIBRARY_PATH: `${SYSTEM}/usr/lib/${triplet}:${SYSTEM}/lib/${triplet}`,
 			GIT_EXEC_PATH: `${SYSTEM}/usr/lib/git-core`,
 			GIT_TEMPLATE_DIR: `${SYSTEM}/usr/share/git-core/templates`,
 			SSL_CERT_FILE: certificates,
@@ -108,17 +141,21 @@ export function imageKey(
 	layer: string,
 	user: GuestUser,
 	from?: string,
+	arch: GuestArch = "x64",
 ): string {
+	let packages = guestPackages(arch);
 	return createHash("sha256")
 		.update(JSON.stringify({
 			nvx: NVX_RELEASE.version,
 			layer,
-			node: NODE_RELEASE.sha256,
-			packages: [...GUEST_PACKAGES, ...BUILD_PACKAGES].map(item => item.sha256),
+			node: NODE_RELEASES[arch].sha256,
+			packages: [...packages.guest, ...packages.build].map(item => item.sha256),
 			install: recipe.install,
 			...from === undefined ? {} : { from },
 			user,
-			build: buildScript(recipe, user, "00000000-0000-4000-8000-000000000000"),
+			build: buildScript(recipe, user, "00000000-0000-4000-8000-000000000000", arch),
+			// An x86_64 key is what it was before arm64 images existed.
+			...arch === "x64" ? {} : { arch },
 		}))
 		.digest("hex")
 		.slice(0, 32);
@@ -171,7 +208,13 @@ export async function installInputs(from: string, into?: string): Promise<string
  * layer unpacked, Node, git and the CA bundle in `/opt/chopin/agent`, the install, an account for
  * the connector's user, then the new layer written to `/out`, compressed as the release's is.
  */
-export function buildScript(recipe: ImageRecipe, user: GuestUser, uuid: string): string {
+export function buildScript(
+	recipe: ImageRecipe,
+	user: GuestUser,
+	uuid: string,
+	arch: GuestArch = "x64",
+): string {
+	let triplet = TRIPLETS[arch];
 	let root = "/tmp/chopin-image/root";
 	let agent = `${root}${IMAGE}`;
 	return [
@@ -182,12 +225,12 @@ export function buildScript(recipe: ImageRecipe, user: GuestUser, uuid: string):
 		'mkdir -p "$B/tools" "$A/node" "$A/sys" "$A/bin"',
 		'for deb in /in/tools/*.deb; do dpkg-deb -x "$deb" "$B/tools"; done',
 		'T="$B/tools"',
-		'tools() { LD_LIBRARY_PATH="$T/usr/lib/x86_64-linux-gnu:$T/lib/x86_64-linux-gnu" "$@"; }',
+		`tools() { LD_LIBRARY_PATH="$T/usr/lib/${triplet}:$T/lib/${triplet}" "$@"; }`,
 		'tools "$T/usr/bin/fsck.erofs" --extract="$R" /in/base.erofs',
 		'tar -xzf /in/node.tar.gz --strip-components=1 -C "$A/node"',
 		'for deb in /in/sys/*.deb; do dpkg-deb -x "$deb" "$A/sys"; done',
 		`export PATH="$A/bin:$A/node/bin:$A/sys/usr/bin:$PATH"`,
-		'export LD_LIBRARY_PATH="$A/sys/usr/lib/x86_64-linux-gnu:$A/sys/lib/x86_64-linux-gnu"',
+		`export LD_LIBRARY_PATH="$A/sys/usr/lib/${triplet}:$A/sys/lib/${triplet}"`,
 		'export GIT_EXEC_PATH="$A/sys/usr/lib/git-core"',
 		// Node carries Mozilla's roots; git, curl and the agent's own tools read them from this file.
 		`node -e 'require("fs").writeFileSync(process.argv[1], require("tls").rootCertificates.join("\\n") + "\\n")' "$A/ca-certificates.crt"`,
@@ -265,7 +308,7 @@ async function writeRecord(images: string, key: string, record: Record<string, u
 }
 
 /** The image `<base>/images/<key>`, as its build recorded it. */
-function recorded(base: string, key: string): Recorded | undefined {
+function recorded(base: string, key: string, arch: GuestArch = "x64"): Recorded | undefined {
 	try {
 		let record = JSON.parse(readFileSync(join(base, "images", `${key}.json`), "utf8")) as {
 			uuid?: unknown;
@@ -283,7 +326,7 @@ function recorded(base: string, key: string): Recorded | undefined {
 			image: {
 				layer: { path: layer, uuid: record.uuid },
 				user: `${record.user.uid}:${record.user.gid}`,
-				...imageEnvironment(),
+				...imageEnvironment(arch),
 			},
 			programs: Array.isArray(programs) ? programs.filter(item => typeof item === "string") : [],
 			record,
@@ -325,6 +368,8 @@ export type ImagesOptions = {
 	/** The UUID of the release's Ubuntu layer, which every image is made from: part of each key. */
 	layer: string;
 	user: GuestUser;
+	/** The guests' architecture; x86_64 unless said. */
+	arch?: GuestArch;
 	builder: ImageBuilder;
 	/** Hears that an image is being built, which takes minutes: the recipes it is for. */
 	building?: (recipes: ImageRecipe[]) => void;
@@ -376,7 +421,7 @@ export async function imageStore(
 					}`,
 				);
 			});
-		let key = imageKey(recipe, options.layer, options.user, inputs);
+		let key = imageKey(recipe, options.layer, options.user, inputs, options.arch);
 		let group = groups.get(key) ?? { recipes: [], programs: [], ...inputs ? { inputs } : {} };
 		group.recipes.push(recipe);
 		group.programs.push(program);
@@ -401,7 +446,7 @@ export async function imageStore(
 	let found = (program: string) => {
 		let key = keyOf.get(program);
 		if (key === undefined || flights.has(key)) return undefined;
-		let image = recorded(options.base, key);
+		let image = recorded(options.base, key, options.arch);
 		let wanted = groups.get(key)!.recipes.flatMap(recipe => recipe.programs);
 		return image && wanted.every(item => image.programs.includes(item)) ? image.image : undefined;
 	};
@@ -449,7 +494,7 @@ async function ensureImage(
 		options.probe ?? processStart(),
 	);
 	try {
-		let found = recorded(options.base, key);
+		let found = recorded(options.base, key, options.arch);
 		if (found) {
 			let unchecked = programs.filter(program => !found.programs.includes(program));
 			if (!unchecked.length) return found.image;
@@ -479,7 +524,7 @@ async function ensureImage(
 		let image: AgentImage = {
 			layer: { path: layer, uuid },
 			user: `${options.user.uid}:${options.user.gid}`,
-			...imageEnvironment(),
+			...imageEnvironment(options.arch),
 		};
 		let missing = await options.builder.missing(image, programs).catch(async error => {
 			await rm(layer, { force: true });
@@ -500,8 +545,9 @@ async function ensureImage(
 			recipes,
 			programs,
 			user: options.user,
-			node: NODE_RELEASE.version,
+			node: NODE_RELEASES[options.arch ?? "x64"].version,
 			nvx: NVX_RELEASE.version,
+			...options.arch && options.arch !== "x64" ? { arch: options.arch } : {},
 		});
 		return image;
 	} finally {
@@ -596,6 +642,8 @@ export function vmBuilder(options: {
 	/** The release's Ubuntu layer, which every image is made from. */
 	layer: { path: string; uuid: string };
 	user: GuestUser;
+	/** The guests' architecture; x86_64 unless said. */
+	arch?: GuestArch;
 	run: VmRunner;
 	download: Downloader;
 	/** The guest's proxy port, for the build's npm. */
@@ -616,17 +664,23 @@ export function vmBuilder(options: {
 			// alone.
 			if (process.platform !== "win32") await chmod(output, 0o777);
 			try {
+				let arch = options.arch ?? "x64";
+				let release = NODE_RELEASES[arch];
+				let packages = guestPackages(arch);
 				let node = await cached(
 					options.base,
-					`https://nodejs.org/dist/v${NODE_RELEASE.version}/${NODE_RELEASE.file}`,
-					NODE_RELEASE.sha256,
+					`https://nodejs.org/dist/v${release.version}/${release.file}`,
+					release.sha256,
 					options.download,
 				);
 				await copyFile(node, join(inputs, "node.tar.gz"));
 				await copyFile(options.layer.path, join(inputs, "base.erofs"));
-				await fetched(options.base, join(inputs, "sys"), GUEST_PACKAGES, options.download);
-				await fetched(options.base, join(inputs, "tools"), BUILD_PACKAGES, options.download);
-				await writeFile(join(inputs, "build.sh"), buildScript(recipe, options.user, job.uuid));
+				await fetched(options.base, join(inputs, "sys"), packages.guest, options.download);
+				await fetched(options.base, join(inputs, "tools"), packages.build, options.download);
+				await writeFile(
+					join(inputs, "build.sh"),
+					buildScript(recipe, options.user, job.uuid, arch),
+				);
 				let shares: VmSpec["shares"] = [
 					{ host: inputs, guest: "/in", mode: "ro" },
 					{ host: output, guest: "/out", mode: "rw" },

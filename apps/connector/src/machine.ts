@@ -16,6 +16,7 @@ import {
 	CONNECTOR_STORE_PROBLEM_HEADER,
 	CONNECTOR_UPDATE_REQUIRED,
 	type HypervisorName,
+	runsMicrovms,
 	SANDBOX_TEXT_LIMIT,
 	type SandboxReport,
 } from "@chopin/protocol/connector";
@@ -195,10 +196,16 @@ export async function machineToken(directory: string, origin: string) {
  */
 let agentsRun: Record<string, string> = {};
 
-/** Say on every request that this process runs its agents in NVX on `hypervisor`, or no longer. */
+/**
+ * Say on every request that this process runs its agents in microVMs on `hypervisor` (NVX's, or
+ * Apple Virtualization's), or no longer.
+ */
 export function runAgentsIn(hypervisor: HypervisorName | undefined) {
 	agentsRun = hypervisor
-		? { [CONNECTOR_SANDBOX_HEADER]: "nvx", [CONNECTOR_SANDBOX_HYPERVISOR_HEADER]: hypervisor }
+		? {
+			[CONNECTOR_SANDBOX_HEADER]: hypervisor === "vz" ? "vz" : "nvx",
+			[CONNECTOR_SANDBOX_HYPERVISOR_HEADER]: hypervisor,
+		}
 		: {};
 }
 
@@ -338,7 +345,7 @@ function aboutHeaders(about: About): Record<string, string> {
 		[CONNECTOR_AGENT_HEADER]: about.agent?.name,
 		[CONNECTOR_AGENT_VERSION_HEADER]: about.agent?.version,
 		[CONNECTOR_SANDBOX_HEADER]: about.sandbox?.engine,
-		...(about.sandbox?.engine === "nvx"
+		...(runsMicrovms(about.sandbox)
 			? { [CONNECTOR_SANDBOX_HYPERVISOR_HEADER]: about.sandbox.hypervisor }
 			: {}),
 		...(about.sandbox?.engine === "none"

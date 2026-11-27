@@ -12,6 +12,7 @@ import {
 	CONNECTOR_PROTOCOL_HEADER,
 	CONNECTOR_SANDBOX_FIX_HEADER,
 	CONNECTOR_SANDBOX_HEADER,
+	CONNECTOR_SANDBOX_HYPERVISOR_HEADER,
 	CONNECTOR_SANDBOX_REASON_HEADER,
 	CONNECTOR_SERVICE_HEADER,
 	CONNECTOR_STORE_PROBLEM_HEADER,
@@ -933,6 +934,15 @@ test("only a connector whose agents run in microVMs connects, and one that can't
 	let [running] = await listed();
 	expect(running.sandbox).toEqual({ engine: "nvx", hypervisor: "kvm" });
 	expect((await storageOf(paired.machine))?.vmProblem).toBeUndefined();
+	// So does a Mac's, whose microVMs are Apple Virtualization's.
+	expect(
+		(await connect({
+			...current,
+			[CONNECTOR_SANDBOX_HEADER]: "vz",
+			[CONNECTOR_SANDBOX_HYPERVISOR_HEADER]: "vz",
+		})).status,
+	).toBe(200);
+	expect((await listed())[0].sandbox).toEqual({ engine: "vz", hypervisor: "vz" });
 
 	// A paired machine whose connector finds it can't run them tells Chopin before it exits.
 	let capability = (body: unknown, token = paired.machineToken) =>

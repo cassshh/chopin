@@ -701,7 +701,7 @@ export async function connect(args: string[], injected: Injected = {}) {
 	let permissions = permissionMemory();
 	let report = sandbox.report;
 	try {
-		if (report.engine === "nvx") runAgentsIn(report.hypervisor);
+		if (report.engine !== "none") runAgentsIn(report.hypervisor);
 		for (;;) {
 			if (lost) {
 				// Checked again until its user can use the hypervisor's device, then it connects again.

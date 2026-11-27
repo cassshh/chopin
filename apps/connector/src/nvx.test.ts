@@ -107,11 +107,21 @@ describe("which machines can run NVX", () => {
 		}
 	});
 
-	test("a machine without virtualization, a Mac and an Arm machine have nothing to fix", () => {
+	test("a Mac on Apple silicon runs its microVMs with Apple's Virtualization framework", () => {
+		expect(nvxSupport(host({ platform: "darwin", arch: "arm64", uid: 501 }))).toEqual({
+			supported: true,
+			hypervisor: "vz",
+			package: "darwin-vz",
+		});
+		let root = nvxSupport(host({ platform: "darwin", arch: "arm64", uid: 0 }));
+		expect(root.supported).toBe(false);
+	});
+
+	test("a machine without virtualization, an Intel Mac and an Arm machine have nothing to fix", () => {
 		for (
 			let machine of [
 				host({}),
-				host({ platform: "darwin", arch: "arm64" }),
+				host({ platform: "darwin", arch: "x64" }),
 				host({ arch: "arm64", devices: { "/dev/kvm": true } }),
 				host({ platform: "win32", arch: "arm64" }),
 			]

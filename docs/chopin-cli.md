@@ -38,11 +38,12 @@ Either way you copy one command and run it in a terminal on that machine, in
 any folder. The installer installs `chopin`, then runs `chopin connect` itself. If the install
 fails, it stops with its own message and runs nothing.
 
-The machine needs Linux or Windows on x86_64 with hardware virtualization: the
+The machine needs Linux or Windows on x86_64 with hardware virtualization, or a
+Mac on Apple silicon (experimental, see [Apple Virtualization](vz-sandbox.md)): the
 agent isn't installed or signed in on it, because `chopin` runs it in a microVM of
 its own and installs it there (see [Coding agents](#coding-agents) and
-[Sandbox](#sandbox)). A Mac or an Arm machine can install `chopin`, but can't run
-Chopin's work. Your server may list its own
+[Sandbox](#sandbox)). An Intel Mac or a Linux or Windows Arm machine can install
+`chopin`, but can't run Chopin's work. Your server may list its own
 [setup agents](self-hosting.md#setup-agents) first, each with its own steps.
 
 ### Local
