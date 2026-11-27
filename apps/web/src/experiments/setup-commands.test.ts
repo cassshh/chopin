@@ -8,6 +8,7 @@ import {
 	agentOptions,
 	chosenAgent,
 	connectArguments,
+	connectorScriptCommand,
 	guessSystem,
 	pairCommand,
 	quote,
@@ -42,6 +43,30 @@ test("one sh command: the installer runs chopin connect itself, with a key only 
 		.toBe("  CHOPIN_URL=https://chopin.example sh -s -- connect --agent copilot");
 	expect(setupCommand(ORIGIN, "sh", findAgent("atomic")).split("\n")[1]).toEndWith(
 		"sh -s -- connect --install-service --agent atomic",
+	);
+});
+
+test("the installer can be pinned to the release this server recommends, in sh and PowerShell", () => {
+	let copilot = findAgent("copilot");
+	expect(
+		setupCommand(ORIGIN, "sh", copilot, { background: false, version: "0.0.31" }).split("\n")[1],
+	)
+		.toBe(
+			"  CHOPIN_URL=https://chopin.example CHOPIN_VERSION=0.0.31 sh -s -- connect --agent copilot",
+		);
+	expect(setupCommand(ORIGIN, "powershell", copilot, { version: "0.0.31" }).split("\n")[0])
+		.toBe("$env:CHOPIN_URL = 'https://chopin.example'; $env:CHOPIN_VERSION = '0.0.31'");
+});
+
+test("this server's own connector, downloaded and run with Bun, for the agent chosen", () => {
+	expect(connectorScriptCommand(ORIGIN, findAgent("copilot"))).toBe(
+		[
+			"mkdir -p ~/.chopin && curl -fsSL https://chopin.example/connector.js -o ~/.chopin/connector.js && \\",
+			"  CHOPIN_URL=https://chopin.example bun --no-env-file --config=/dev/null ~/.chopin/connector.js connect --agent copilot",
+		].join("\n"),
+	);
+	expect(connectorScriptCommand("http://127.0.0.1:8787", findAgent("atomic"))).toEndWith(
+		"~/.chopin/connector.js connect --agent atomic",
 	);
 });
 

@@ -5,12 +5,15 @@ import { InlineNotice } from "@chopin/visuals/inline-notice";
 import {
 	AgentChoice,
 	Command,
+	foreground,
 	Needs,
+	Setting,
 	shellPlace,
 	SystemChoice,
 	useAgent,
 	useSystem,
 } from "./machine-setup";
+import { useRecommendedVersion } from "./machines";
 import { expiryLabel, usePairingKey } from "./pairing-key";
 import { keyProblem } from "./pairing-problems";
 import {
@@ -21,8 +24,6 @@ import {
 	shellFor,
 } from "./setup-commands";
 
-import type { ReactNode } from "react";
-import type { CodingAgent } from "@chopin/protocol/agents";
 import type { KeyChoices, PairingKey } from "./pairing-key";
 import type { SetupSystem } from "./setup-commands";
 
@@ -44,43 +45,6 @@ function storedSettings(): Settings {
 	} catch {
 		return {};
 	}
-}
-
-/**
- * A setting that is on or off, as a switch at the end of its title with what it means under it.
- * `disabled` says why it can't change.
- */
-function Setting(
-	{ checked, children, disabled, onChange, title }: {
-		checked: boolean;
-		children: ReactNode;
-		disabled?: ReactNode;
-		onChange: (checked: boolean) => void;
-		title: string;
-	},
-) {
-	let titleId = useId();
-	let detailId = useId();
-	return (
-		<div className="machines-setting">
-			<div className="machines-setting-head">
-				<h3 className="machines-setting-title" id={titleId}>{title}</h3>
-				<button
-					aria-checked={checked}
-					aria-describedby={detailId}
-					aria-labelledby={titleId}
-					className="machines-switch"
-					disabled={!!disabled}
-					onClick={() => onChange(!checked)}
-					role="switch"
-					type="button"
-				>
-					<span aria-hidden="true" className="machines-switch-thumb" />
-				</button>
-			</div>
-			<p className="machines-setting-detail" id={detailId}>{disabled ?? children}</p>
-		</div>
-	);
 }
 
 /** What stands in the command's place before there is a key to put in it. */
@@ -189,12 +153,6 @@ function MachineName({ name, onChange }: { name: string; onChange: (name: string
 	);
 }
 
-/** Why an agent that asks permission in the terminal can't run as the background service. */
-function foreground(agent: CodingAgent) {
-	if (agent.unattended === true) return undefined;
-	return `${agent.name} asks for permission in the terminal, so it runs there. To run it in the background, ${agent.unattended.setting}, then use chopin connect --install-service.`;
-}
-
 /**
  * Add a cloud machine: name the machine if you like, choose the agent, whether it runs in the background and whether Chopin may build
  * and prototype on it by itself, then generate an install script with a single-use key, which
@@ -206,6 +164,7 @@ export function AddServerPage() {
 	let [system, setSystem] = useSystem(saved.system);
 	let { agent, options, choose } = useAgent("server");
 	let [background, setBackground] = useState(saved.background ?? true);
+	let recommended = useRecommendedVersion();
 	let [autoRun, setAutoRun] = useState(saved.autoRun ?? false);
 	let [shared, setShared] = useState(saved.shared ?? false);
 	let [name, setName] = useState(saved.name ?? "");
@@ -297,6 +256,7 @@ export function AddServerPage() {
 										name,
 									})!
 									: setupCommand(location.origin, shell, builtIn!, {
+										...(recommended ? { version: recommended } : {}),
 										key: pairing.key,
 										background: runsInBackground,
 										name,

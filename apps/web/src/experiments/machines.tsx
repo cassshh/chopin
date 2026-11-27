@@ -28,14 +28,8 @@ import type { KeyboardEvent } from "react";
 import type { Machine } from "../machine-summary";
 import type { NavigationDialogMotion } from "../navigation-dialog";
 
-/**
- * The signed-in person's machines, and the teammates' machines shared with them, asked for again
- * every few seconds while the page is in view. `machines` is undefined until the first answer;
- * `error` is the server's code for the last failed answer, which the page turns into words. The
- * sidebar's count shares the same list.
- */
-export function useMachines() {
-	let { machines, teammates, error } = useLiveMachines(true);
+/** The chopin release this server recommends (`chopin update` installs it), once it has said. */
+export function useRecommendedVersion(): string | null {
 	let [recommended, setRecommended] = useState<string | null>(null);
 	useEffect(() => {
 		let abort = new AbortController();
@@ -44,6 +38,18 @@ export function useMachines() {
 			.then(value => setRecommended(value?.version ?? null), () => {});
 		return () => abort.abort();
 	}, []);
+	return recommended;
+}
+
+/**
+ * The signed-in person's machines, and the teammates' machines shared with them, asked for again
+ * every few seconds while the page is in view. `machines` is undefined until the first answer;
+ * `error` is the server's code for the last failed answer, which the page turns into words. The
+ * sidebar's count shares the same list.
+ */
+export function useMachines() {
+	let { machines, teammates, error } = useLiveMachines(true);
+	let recommended = useRecommendedVersion();
 	let forget = (id: string) => liveMachines.update(list => list.filter(value => value.id !== id));
 	let retry = useCallback(() => void liveMachines.load(), []);
 	/** Set or clear the favorite: starred at once, then as the server says. */
