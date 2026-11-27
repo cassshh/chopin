@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { SQL } from "bun";
 
 import { createChannel, registerTestDatabase, seedChannel, testChannelPath } from "./database";
-import { authenticate, expect, test } from "./room";
+import { approvePlan, authenticate, expect, test } from "./room";
 import { e2eDatabaseName, e2ePort } from "./ports";
 import { GITHUB_APP_ENV } from "./github-app";
 import { HOST, ROOT } from "./servers";
@@ -236,7 +236,7 @@ test("a build running across a Chopin restart finishes Built", async ({ page }) 
 	await page.getByRole("button", { name: "Add machine", exact: true }).click();
 	await expect(page.getByRole("status").filter({ hasText: "Connected" })).toHaveText("Connected");
 	await page.goto(`${ORIGIN}${testChannelPath(room)}`);
-	await page.getByRole("button", { name: "Build plan", exact: true }).click();
+	await approvePlan(page);
 
 	// The agent has started its first task when Chopin is deployed again.
 	await expect.poll(() => exists(paused), { timeout: 30_000 }).toBe(true);
