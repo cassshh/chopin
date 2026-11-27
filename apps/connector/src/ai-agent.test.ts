@@ -5,6 +5,8 @@ import { join } from "node:path";
 import {
 	agentAiEnvironment,
 	atomicModels,
+	chooseCopilotModel,
+	copilotAgent,
 	managedEnvironment,
 	withoutOwnerAgent,
 } from "./ai-agent";
@@ -204,4 +206,95 @@ test("an agent on Chopin's AI accounts starts from only what is permitted of the
 		JAVA_HOME: "/opt/java",
 		SOME_FLAG: "1",
 	});
+});
+
+test("points a Copilot CLI agent at Copilot on the relay as its own provider, with no GitHub sign-in", () => {
+	expect(copilotAgent(["copilot", "--acp", "--allow-all"])).toBe(true);
+	expect(copilotAgent(["/opt/homebrew/bin/copilot"])).toBe(true);
+	expect(copilotAgent(["C:\\tools\\copilot.cmd"])).toBe(true);
+	expect(copilotAgent(["atomic-acp"])).toBe(false);
+	let home = join(scratch, "copilot-run.agent");
+	let env = agentAiEnvironment({
+		command: ["copilot", "--acp", "--allow-all"],
+		home,
+		providers: PROVIDERS,
+		relayed: RELAYED,
+		copilotModel: {
+			id: "gpt-6.1-sol",
+			wire: "responses",
+			maxPromptTokens: 128_000,
+			maxOutputTokens: 16_000,
+			vision: true,
+		},
+	});
+	expect(env).toMatchObject({
+		COPILOT_HOME: join(home, "copilot"),
+		COPILOT_PROVIDER_BASE_URL: RELAYED.baseUrls["github-copilot"],
+		COPILOT_PROVIDER_TYPE: "openai",
+		COPILOT_PROVIDER_BEARER_TOKEN: "chopin_ai_copilot",
+		COPILOT_PROVIDER_HEADERS: "Copilot-Integration-Id: vscode-chat",
+		COPILOT_MODEL: "gpt-6.1-sol",
+		COPILOT_PROVIDER_WIRE_API: "responses",
+		COPILOT_PROVIDER_MAX_PROMPT_TOKENS: "128000",
+		COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "16000",
+		COPILOT_PROVIDER_VISION: "true",
+		OPENAI_API_KEY: "chopin_ai_openai",
+	});
+	// The stand-in goes only to the relay: nothing for Copilot CLI to send GitHub as a sign-in.
+	expect(env.COPILOT_GITHUB_TOKEN).toBeUndefined();
+	// Another agent keeps Copilot's stand-in in its variable, and no custom provider.
+	let atomic = agentAiEnvironment({
+		command: ["atomic-acp"],
+		home: join(scratch, "atomic-copilot.agent"),
+		providers: PROVIDERS,
+		relayed: RELAYED,
+	});
+	expect(atomic.COPILOT_GITHUB_TOKEN).toBe("chopin_ai_copilot");
+	expect(atomic.COPILOT_PROVIDER_BASE_URL).toBeUndefined();
+	// The owner's own Copilot provider settings never reach an agent.
+	expect(withoutOwnerAgent({
+		COPILOT_PROVIDER_BASE_URL: "http://localhost:11434",
+		COPILOT_PROVIDER_API_KEY: "sk-owner",
+		COPILOT_MODEL: "kept",
+	})).toEqual({ COPILOT_MODEL: "kept" });
+});
+
+test("runs Copilot CLI on the owner's model when Copilot offers it, else on Copilot's default chat model", () => {
+	let model = (
+		id: string,
+		extra: Record<string, unknown> = {},
+		supports: Record<string, unknown> = { tool_calls: true },
+	) => ({
+		id,
+		model_picker_enabled: true,
+		capabilities: {
+			type: "chat",
+			supports,
+			limits: { max_prompt_tokens: 64_000, max_output_tokens: 8_000 },
+		},
+		...extra,
+	});
+	let list = {
+		data: [
+			model("text-embedding-3-small", { capabilities: { type: "embeddings" } }),
+			model("hidden", { model_picker_enabled: false }),
+			model("no-tools", {}, { tool_calls: false }),
+			model("off", { policy: { state: "disabled" } }),
+			model("codex", { supported_endpoints: ["/responses"] }),
+			model("sonnet", { is_chat_default: true }, { tool_calls: true, vision: true }),
+		],
+	};
+	expect(chooseCopilotModel(list)).toEqual({
+		id: "sonnet",
+		wire: "completions",
+		maxPromptTokens: 64_000,
+		maxOutputTokens: 8_000,
+		vision: true,
+	});
+	expect(chooseCopilotModel(list, "codex")).toMatchObject({ id: "codex", wire: "responses" });
+	// A model the owner named that Copilot doesn't offer them gives way to the default.
+	expect(chooseCopilotModel(list, "hidden")?.id).toBe("sonnet");
+	expect(chooseCopilotModel({ data: [model("first"), model("second")] })?.id).toBe("first");
+	expect(chooseCopilotModel({ data: [] })).toBeUndefined();
+	expect(chooseCopilotModel("nonsense")).toBeUndefined();
 });

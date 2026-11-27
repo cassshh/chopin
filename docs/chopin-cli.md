@@ -950,6 +950,16 @@ the agent runs on those accounts with nothing of yours:
   provider (and `openai-api` and `anthropic-api`) to its base URL on the relay,
   with `apiKey` naming the provider's key variable, and reads the model catalog
   through Chopin (`ATOMIC_MODEL_CATALOG_URL`).
+- **GitHub Copilot CLI** (`--agent copilot`) runs on a granted Copilot as its
+  custom model provider: `COPILOT_PROVIDER_BASE_URL` is Copilot's base URL on the
+  relay, `COPILOT_PROVIDER_TYPE` is `openai`, `COPILOT_PROVIDER_BEARER_TOKEN` holds
+  the stand-in and `COPILOT_PROVIDER_HEADERS` Copilot's headers, so it needs no
+  GitHub sign-in and gets no `COPILOT_GITHUB_TOKEN`. Before it starts, the
+  connector reads Copilot's `/models` through the relay and sets `COPILOT_MODEL`
+  (with the model's endpoint, token limits and image input): your `--env
+  COPILOT_MODEL=…` when Copilot offers it to the person, else Copilot's default
+  chat model. A list that can't be read, or offers no chat model, starts no agent.
+  Your own `COPILOT_PROVIDER_*` settings never reach the agent.
 - **When it ends.** The connector ends the launch when the run ends; Chopin also ends
   it when the run ends there, if that end never arrives. When Chopin ends it first
   (your machine revoked, the document archived, its deadline), the relay hears it from
