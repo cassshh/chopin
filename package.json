@@ -29,6 +29,7 @@
 		"verify:agents": "bun scripts/verify-agents.ts"
 	},
 	"devDependencies": {
+		"@bastani/atomic-telemetry": "link:../atomic/packages/telemetry",
 		"@axe-core/playwright": "4.13.0",
 		"@babel/parser": "7.29.7",
 		"@playwright/test": "1.62.1",
@@ -41,6 +42,9 @@
 		"postcss": "8.5.23",
 		"postcss-value-parser": "4.2.0",
 		"yaml": "2.9.0"
+	},
+	"overrides": {
+		"@bastani/atomic-ai": "link:../atomic/packages/ai"
 	},
 	"patchedDependencies": {
 		"@mdxeditor/editor@4.1.0": "patches/@mdxeditor%2Feditor@4.1.0.patch",
