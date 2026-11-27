@@ -18,14 +18,14 @@ same words and boots the microVM with Virtualization.framework. So `startVm`,
 `makeDisk`, the image builds and the start checks run through the same code on
 every host. What differs is chosen by the hypervisor, `vz`:
 
-| Part              | NVX (Linux, Windows)                     | Apple Virtualization (Mac)                                |
-| ----------------- | ---------------------------------------- | --------------------------------------------------------- |
-| Support check     | `/dev/kvm`, `/dev/mshv` or WHP on x86_64 | macOS on arm64, not as root (`nvxSupport`)                |
-| Program           | `nvx`                                    | `chopin-vz`, with `--hypervisor=vz`                       |
-| Guest             | x86_64, NVX's kernel and Ubuntu layer    | arm64, Ubuntu's kernel and a base layer of its own        |
-| Image recipe      | x86_64 Node, `GUEST_PACKAGES`            | arm64 Node, `ARM64_GUEST_PACKAGES` (`images.ts` `arch`)   |
-| What Chopin hears | `{ engine: "nvx", hypervisor }`          | `{ engine: "vz", hypervisor: "vz" }`                      |
-| Package           | Downloaded, pinned (`NVX_RELEASE`)       | Built with `apps/connector/vz/build.sh`, `CHOPIN_VZ_ROOT` |
+| Part              | NVX (Linux, Windows)                     | Apple Virtualization (Mac)                              |
+| ----------------- | ---------------------------------------- | ------------------------------------------------------- |
+| Support check     | `/dev/kvm`, `/dev/mshv` or WHP on x86_64 | macOS on arm64, not as root (`nvxSupport`)              |
+| Program           | `nvx`                                    | `chopin-vz`, with `--hypervisor=vz`                     |
+| Guest             | x86_64, NVX's kernel and Ubuntu layer    | arm64, Ubuntu's kernel and a base layer of its own      |
+| Image recipe      | x86_64 Node, `GUEST_PACKAGES`            | arm64 Node, `ARM64_GUEST_PACKAGES` (`images.ts` `arch`) |
+| What Chopin hears | `{ engine: "nvx", hypervisor }`          | `{ engine: "vz", hypervisor: "vz" }`                    |
+| Package           | Downloaded, pinned (`NVX_RELEASE`)       | Built on the Mac with `apps/connector/vz/build.sh`      |
 
 Chopin takes either report as a connector that runs its agents in microVMs
 (`runsMicrovms` in `packages/protocol/connector.ts`); the Machines page says
@@ -83,8 +83,10 @@ decides as it does for NVX.
   when the microVM starts, since virtio-fs shares folders: a change to the host's
   file after that isn't seen.
 - **`--mount-write`** isn't supported; `vmSpec` never asks for it.
-- **The package** isn't downloaded or pinned yet: `CHOPIN_VZ_ROOT` names a
-  folder `build.sh` made. Its base layer gets a new UUID with each build, so
+- **The package** isn't downloaded or pinned yet: `build.sh` builds it on the Mac and
+  installs it in the connector's state directory (`<state>/vz/<version>`), where
+  `chopin connect` and the chopin service find it. `CHOPIN_VZ_ROOT` names one built
+  elsewhere (`build.sh <folder>`). Its base layer gets a new UUID with each build, so
   images are rebuilt after one.
 - NVX's start retry (OpenVMM's io_uring failure), its run folders and its
   device-denied detection have nothing to do on a Mac.
@@ -122,8 +124,8 @@ decides as it does for NVX.
 From a checkout of this branch (the released `chopin` binaries don't carry it yet):
 
 ```sh
-apps/connector/vz/build.sh ~/chopin-vz
-CHOPIN_VZ_ROOT=~/chopin-vz bun apps/connector/src/main.ts connect
+apps/connector/vz/build.sh
+bun apps/connector/src/main.ts connect --agent atomic
 ```
 
 Measured on an M2 Pro: a microVM starts and runs a command in under a second; the

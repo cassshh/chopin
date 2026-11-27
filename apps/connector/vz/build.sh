@@ -1,13 +1,24 @@
 #!/bin/sh
-# Builds chopin's Apple Virtualization package for a Mac on Apple silicon into $1 (default
-# ./vz-package): bin/chopin-vz, the helper that starts each microVM, and guest/, the arm64 kernel,
-# initramfs and Ubuntu base layer its guests boot. Point the connector at it with CHOPIN_VZ_ROOT.
+# Builds chopin's Apple Virtualization package for a Mac on Apple silicon: bin/chopin-vz, the helper
+# that starts each microVM, and guest/, the arm64 kernel, initramfs and Ubuntu base layer its guests
+# boot. With no argument it installs the package where the connector looks for it, in its state
+# directory (<state>/vz/<version>), so `chopin connect` and the chopin service find it by
+# themselves. With a folder as $1 it builds there instead, for CHOPIN_VZ_ROOT to name.
 #
 # Needs Xcode's command line tools (swiftc, codesign) and Docker (for the guest half, built in an
 # arm64 Ubuntu container).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-out=$(mkdir -p "${1:-vz-package}" && cd "${1:-vz-package}" && pwd)
+# The package's version, as the connector pins it (VZ_RELEASE in src/nvx.ts).
+version=$(sed -n 's/^export const VZ_RELEASE = { version: "\([^"]*\)" } as const;$/\1/p' "$here/../src/nvx.ts")
+[ -n "$version" ] || {
+	echo "build.sh couldn't read the package's version from src/nvx.ts." >&2
+	exit 1
+}
+# The connector's state directory, as `stateDirectory` in src/workspace.ts finds it.
+state="${CHOPIN_HOME:-${CHOPIN_CONNECTOR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/chopin/connector}}"
+target="${1:-$state/vz/$version}"
+out=$(mkdir -p "$target" && cd "$target" && pwd)
 kernel="${KERNEL:-7.0.0-44-generic}"
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || {
 	echo "build.sh builds the package for macOS on Apple silicon only." >&2
@@ -37,4 +48,10 @@ docker run --rm --platform linux/arm64 -e KERNEL="$kernel" \
 	sh /build-inside.sh
 
 (cd "$out" && find bin guest -type f ! -name SHA256SUMS | sort | xargs shasum -a 256 > SHA256SUMS)
-echo "✓ Built into $out. Use it with: CHOPIN_VZ_ROOT=$out chopin connect"
+if [ -n "${1:-}" ]; then
+	echo "✓ Built into $out. Use it with: CHOPIN_VZ_ROOT=$out chopin connect"
+else
+	# What tells the connector the package in its state directory is whole.
+	echo "$version" > "$out/.verified"
+	echo "✓ Installed chopin's Apple Virtualization package $version in $out. chopin connect finds it there."
+fi

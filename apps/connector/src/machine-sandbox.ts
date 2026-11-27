@@ -165,9 +165,9 @@ export async function openMachineSandbox(options: {
 			// The Apple Virtualization package isn't published yet: it is built on the Mac itself.
 			throw new Error(
 				"chopin runs agents on this Mac in Apple Virtualization microVMs, whose package (a helper, "
-					+ "an arm64 Linux kernel and a base layer) isn't installed. Build it with "
-					+ "apps/connector/vz/build.sh from a Chopin checkout, then set CHOPIN_VZ_ROOT to the "
-					+ "folder it made.",
+					+ "an arm64 Linux kernel and a base layer) isn't installed. Build it once with "
+					+ "apps/connector/vz/build.sh from a Chopin checkout (it needs Docker and Xcode's "
+					+ "command line tools), then run this command again.",
 			);
 		}
 		output.say(
