@@ -59,9 +59,11 @@ export const INITIAL_JAVASCRIPT_BUDGET: JavaScriptBudget = {
 // The dark theme's tokens (4.3 KB raw of them: the page draws the chosen theme before it runs any of
 // its own code, so they cannot load later), the account menu's Theme row and the dark theme's few
 // written-out values measure 192,327 B raw and 34,116 B gzip locally; allow the same margin above that.
+// The Build tab's issue pills, with GitHub's issue and pull request glyphs, add about 160 B raw;
+// allow 300 B raw.
 export const INITIAL_STYLESHEET_BUDGET: StylesheetBudget = {
 	gzip: 34_490,
-	raw: 193_130,
+	raw: 193_430,
 };
 
 export function enforceInitialJavaScript(

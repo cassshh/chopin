@@ -122,6 +122,9 @@ function requestedByLines(read: "read_implementation" | "read_rebuild") {
 export function implementationPrompt(worktrees: RunWorktrees) {
 	return [
 		"Read the human-approved graph and document with read_implementation from Chopin's MCP server.",
+		"If read_implementation returns issues, the tasks are GitHub issues: in the body of the pull",
+		"request that implements a task, put a line `Closes #<number>` with issues.tasks[<task id>].number",
+		"for each task it implements, so GitHub links the pull request and closes the issue on merge.",
 		"You are the orchestrator. You MUST use sub-agents for independent dependency-ready tasks.",
 		"Give each sub-agent explicit file ownership and tell it other agents are working in the repository.",
 		...worktreeLines(worktrees),

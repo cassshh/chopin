@@ -135,8 +135,12 @@ function readyChild(text: string): string | undefined {
 	return path ? parseChildDocumentPath(path)?.childSlug : undefined;
 }
 
-/** A GitHub pull request link a build's line names as `[#12](url)`; nothing else is a link. */
-const PULL_LINK = /\[#(\d+)\]\((https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\1)\)/g;
+/**
+ * A GitHub pull request or issue a build's line names as `[#12](url)`; nothing else is a link.
+ */
+const PULL_LINK = /\[#(\d+)\]\((https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:pull|issues)\/\1)\)/g;
+/** The line Create issues posts: a document's tasks made into issues, or more added. */
+const ISSUES_LINE = /^@[\w-]+ (?:made this document’s tasks into|added \d+ issues? under) \[#\d+\]/;
 
 /** A system line's words, with a build's pull request links drawn as links. */
 export function systemParts(text: string): Array<string | { number: string; url: string }> {
@@ -183,6 +187,7 @@ function SystemEntry(
 		>
 			<div className="mt-0.5 shrink-0">
 				{/^Build (opened|updated|finished|stopped|failed|didn’t)\b/.test(item.text)
+						|| ISSUES_LINE.test(item.text)
 					? <WrenchIcon aria-hidden="true" size={16} />
 					: <SignInIcon aria-hidden="true" size={16} />}
 			</div>

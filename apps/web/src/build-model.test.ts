@@ -1,4 +1,5 @@
 import { AI_ACCOUNT_UNCHECKED_RUN, NO_AI_ACCOUNT_RUN } from "@chopin/protocol/ai-credentials";
+import { issuesComplete } from "./build-start";
 import { describe, expect, it } from "bun:test";
 
 import {
@@ -1116,14 +1117,14 @@ describe("build status", () => {
 			.toMatchObject({ tip: "Edits since someone else’s build" });
 	});
 
-	it("asks for review of drafted tasks with Approve plan, which needs no Planner", () => {
+	it("asks for review of drafted tasks with Review plan, whose approval needs no Planner", () => {
 		let review = look(snapshot());
 		expect(review).toEqual({
 			kind: "review",
 			tasks: 1,
-			tip: "Review the 1 task in Build, then approve the plan to start building",
+			tip: "Review the 1 task in Build, then approve the plan or create issues",
 		});
-		expect(buildLabel(review)).toBe("Approve plan");
+		expect(buildLabel(review)).toBe("Review plan");
 		expect(buildTabReady(snapshot(), review)).toBe(true);
 		// Starting drafted tasks needs no Planner, only the connection.
 		expect(look(snapshot(), { planner: false }).kind).toBe("review");
@@ -1163,6 +1164,67 @@ describe("build status", () => {
 		});
 		expect(look(returned).kind).toBe("plan");
 		expect(buildTabReady(returned, look(returned))).toBe(true);
+		// Tasks made into issues, with nothing built, keep Build open after a reload.
+		let exported = snapshot({
+			issues: {
+				by: "ana",
+				current: true,
+				running: false,
+				parent: { number: 18, url: "https://github.com/o/r/issues/18" },
+				tasks: { a: { number: 19, url: "https://github.com/o/r/issues/19" } },
+			},
+		});
+		expect(buildTabReady(exported, look(exported))).toBe(true);
+	});
+
+	it("names the parent issue instead of Approve plan once the tasks are issues, and still offers Approve plan", () => {
+		let issues = {
+			by: "ana",
+			current: true,
+			running: false,
+			parent: { number: 18, url: "https://github.com/o/r/issues/18" },
+			tasks: { a: { number: 19, url: "https://github.com/o/r/issues/19" } },
+		};
+		let exported = look(snapshot({ issues }));
+		expect(exported).toEqual({
+			kind: "issued",
+			parent: 18,
+			tip: "These tasks are GitHub issues under #18",
+			build: true,
+		});
+		expect(buildLabel(exported)).toBe("Issues in #18");
+		// A reader sees the issues but is offered no Approve plan.
+		expect(look(snapshot({ issues }), { canEdit: false })).toMatchObject({ build: false });
+		// Issues made for an older version of the tasks, or still being made: the tasks are back
+		// under review, where Approve plan or Create issues takes them on.
+		expect(look(snapshot({ issues: { ...issues, current: false } })).kind).toBe("review");
+		expect(look(snapshot({ issues: { ...issues, running: true } })).kind).toBe("review");
+		expect(look(snapshot({ issues, planRevision: 5 })).kind).not.toBe("issued");
+		// Approving stays held where review holds it, and the card says why.
+		expect(look(snapshot({ issues }), { connected: false })).toMatchObject({
+			kind: "issued",
+			build: false,
+			blocked: "Chopin isn’t connected",
+		});
+		// A task whose issue wasn't made keeps the tasks under review, with Create missing issues.
+		let partial = {
+			...issues,
+			tasks: { a: { problem: "GitHub couldn't be reached. Try again." } },
+		};
+		expect(look(snapshot({ issues: partial })).kind).toBe("review");
+	});
+
+	it("counts an export complete only with the parent and every task's issue, no problem and no link left", () => {
+		let parent = { number: 18, url: "https://github.com/o/r/issues/18" };
+		let issue = { number: 19, url: "https://github.com/o/r/issues/19" };
+		expect(issuesComplete({ parent, tasks: { a: issue } }, ["a"])).toBe(true);
+		expect(issuesComplete({ tasks: { a: issue } }, ["a"])).toBe(false);
+		expect(issuesComplete({ parent, pending: true, tasks: { a: issue } }, ["a"])).toBe(false);
+		expect(issuesComplete({ parent, tasks: { a: issue } }, ["a", "b"])).toBe(false);
+		expect(
+			issuesComplete({ parent, tasks: { a: { ...issue, problem: "Couldn't link it" } } }, ["a"]),
+		)
+			.toBe(false);
 	});
 });
 

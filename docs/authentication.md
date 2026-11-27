@@ -34,7 +34,7 @@ Pull requests:   Read and write
 Workflows:       Read and write
 Checks:          Read-only
 Commit statuses: Read-only
-Issues:          Read-only
+Issues:          Read and write
 Metadata:        Read-only (automatic)
 ```
 
@@ -44,12 +44,15 @@ Metadata:        Read-only (automatic)
 | Pull requests              | Pull request link summaries and the Planner's pull request tools. Machines open draft pull requests. |
 | Workflows                  | Machines pushing `.github/workflows` changes.                                                        |
 | Checks and Commit statuses | The Planner's pull request tools.                                                                    |
-| Issues                     | Issue link summaries. Without it, those stay plain links.                                            |
+| Issues                     | Issue link summaries, and Build's Create issues, which makes tasks into issues as the presser.       |
 | Metadata                   | GitHub grants it to every App.                                                                       |
 
 ### Who writes to repositories
 
-The server never writes to a repository. Work on a paired machine pushes and
+The server never writes code to a repository. The one thing it writes there is issues: Build's
+**Create issues** makes a document's tasks into a parent issue and sub-issues, with the GitHub
+login of the writer who pressed it (see
+[Export as GitHub issues](implementation-lifecycle.md#export-as-github-issues)). Work on a paired machine pushes and
 opens pull requests as the App's bot. The server mints it a one-hour installation
 token for one repository with the App's private key, after checking that the
 person the work is for can push there.

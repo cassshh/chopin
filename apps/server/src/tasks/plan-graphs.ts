@@ -6,6 +6,7 @@ import * as Comments from "../comments/service";
 import { drain, exclusive, persistExclusive, source } from "../plan/service";
 import { broadcast } from "../wire";
 import { announceImplementation } from "./notifications";
+import { exporting } from "./exporting";
 
 import type { Plan } from "../plan/service";
 import type { ClaimInput, ClaimResult, Graph, GraphAdapter, Result } from "./graphs";
@@ -47,6 +48,10 @@ export async function claimImplementation(plan: Plan, input: ClaimInput): Promis
 	try {
 		await drain(plan);
 		return await exclusive(plan, async () => {
+			// Issues being made for these tasks: a claim waits until their links are all there.
+			if (exporting(plan.id)) {
+				return { kind: "refused", reason: "issues are being created for these tasks" };
+			}
 			let version = plan.graph?.versions.at(-1);
 			let eligibility = version
 				&& claimEligibility(plan.lifecycle, version, input.run.id);

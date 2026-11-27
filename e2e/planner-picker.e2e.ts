@@ -2174,8 +2174,10 @@ test("anyone who can edit a document chooses a teammate's shared machine for its
 	await expect(machineButton(editor)).toHaveAccessibleName(
 		"Runs on Build box. Connecting to Build box",
 	);
-	// Quinn's builds run there too: Build plan is ready, not greyed out.
-	let plan = editor.getByRole("button", { name: "Approve plan", exact: true });
+	// Quinn's builds run there too: Approve plan is ready, not greyed out.
+	await editor.getByRole("button", { name: "Review plan", exact: true }).click();
+	let plan = editor.getByRole("region", { name: "Build", exact: true })
+		.getByRole("button", { name: "Approve plan", exact: true });
 	await expect(plan).toBeVisible();
 	await expect(plan).not.toHaveAttribute("aria-disabled", "true");
 	await shoot(editor, "shared-machine-chosen");
@@ -2254,8 +2256,10 @@ test("a shared machine with no checkouts serves every repository its owner can p
 	await expect(menu).toBeHidden();
 	await expect(runsOnButton(page)).toHaveAccessibleName(/^Runs on Build box/);
 
-	// Build plan is ready, and pressing it queues the build on casey's machine, for tessa.
-	let plan = page.getByRole("button", { name: "Approve plan", exact: true });
+	// Approve plan is ready, and pressing it queues the build on casey's machine, for tessa.
+	await page.getByRole("button", { name: "Review plan", exact: true }).click();
+	let plan = page.getByRole("region", { name: "Build", exact: true })
+		.getByRole("button", { name: "Approve plan", exact: true });
 	await expect(plan).toBeVisible();
 	await expect(plan).not.toHaveAttribute("aria-disabled", "true");
 	await shoot(page, "shared-machine-build-plan");

@@ -3,9 +3,13 @@ import { Face } from "@chopin/editor/face";
 import { sentenceCase } from "./sentence-case";
 import {
 	CheckIcon,
+	IssueOpenIcon,
 	LoaderIcon,
 	MachineIcon,
 	ProgressRingIcon,
+	PullRequestClosedIcon,
+	PullRequestMergedIcon,
+	PullRequestOpenIcon,
 	ServerIcon,
 	WarningIcon,
 } from "@chopin/icons";
@@ -40,10 +44,13 @@ import {
 } from "./build-model";
 import {
 	cancelBuildRequest,
+	createIssues,
 	implementationEndpoint,
 	implementationResponse as response,
+	issuesComplete,
 	stopBuild,
 } from "./build-start";
+import { useDocumentPeople } from "./chat/document-people";
 import { inlineText } from "./chat/inline-text";
 import { InlineMarkdown, MessageMarkdown } from "./chat/markdown";
 import { LocalAgentNote } from "./local-agent-note";
@@ -53,7 +60,11 @@ import "./build-source.css";
 import type { ReactNode } from "react";
 import type { BuildPlan } from "./build-plan-button";
 import type { TaskState } from "./build-model";
-import type { BuildMachine, BuildRequest } from "@chopin/protocol/implementation";
+import type {
+	BuildMachine,
+	BuildRequest,
+	IssueExportSnapshot,
+} from "@chopin/protocol/implementation";
 
 /** What the status card says: a title and count, one line under it, and per-task progress. */
 type Card = {
@@ -142,6 +153,13 @@ export function BuildView(
 	let [reason, setReason] = useState("");
 	usePendingWork(returning && reason.trim() !== "");
 	let [open, setOpen] = useState<Record<string, boolean>>({});
+	// Create issues: the assignee picked per task, as a login, `copilot` or "" for nobody.
+	let [assigning, setAssigning] = useState(false);
+	let [assignees, setAssignees] = useState<Record<string, string>>({});
+	let [creating, setCreating] = useState(false);
+	// Approve plan can also make the tasks GitHub issues first, so the build's pull requests close them.
+	let [trackIssues, setTrackIssues] = useState(false);
+	let people = useDocumentPeople(room, assigning);
 	let [linked, setLinked] = useState<string>();
 	let [now, setNow] = useState(() => Date.now());
 	let sinceHeading = useId();
@@ -223,9 +241,100 @@ export function BuildView(
 			? liveTaskState(report?.state ?? "queued", outstanding.has(task.id), rebuilding)
 			: report?.state ?? "queued";
 
+	// The graph's tasks can become GitHub issues once drafted or built, while no build runs.
+	let issues = snapshot?.issues;
+	let graphTasks = snapshot?.graph?.definition.tasks ?? [];
+	let exportable = canEdit && graphTasks.length > 0 && !activeBuild && !issues?.running
+		&& ["review", "done", "failed", "stopped", "live"].includes(phase.kind);
+	let unfinished = graphTasks.filter(task => {
+		let entry = issues?.tasks[task.id];
+		return !entry?.number || !!entry.problem || !!entry.assignee && !entry.assigned;
+	});
+	// Every task has its issue, but the export is for older tasks (one removed, a dependency
+	// added) or stopped short (a close GitHub refused, links an interrupted press left unmade): a
+	// press brings GitHub up to date, with no assignees to pick.
+	let outdated = !!issues?.parent && unfinished.length === 0
+		&& (!issues.current || !!issues.problem || !!issues.pending);
+	let createAll = async () => {
+		let graph = snapshot?.graph;
+		if (!graph || creating) return;
+		setCreating(true);
+		setActionError(undefined);
+		try {
+			await createIssues(room, {
+				graphNumber: graph.number,
+				graphRevision: graph.revision,
+				assignees: Object.fromEntries(
+					unfinished
+						.filter(task => !issues?.tasks[task.id]?.assigned)
+						.map(task => [task.id, assignees[task.id] || null]),
+				),
+			});
+			setAssigning(false);
+		} catch (error) {
+			setActionError(
+				sentenceCase(error instanceof Error ? error.message : "Couldn’t create the issues"),
+			);
+		} finally {
+			setCreating(false);
+			build.reload();
+		}
+	};
+	let issuesAction: ReactNode = issues?.running || creating
+		? (
+			<span className="build-card-quiet" role="status">
+				<LoaderIcon aria-hidden="true" className="build-card-spin" /> Creating issues
+			</span>
+		)
+		: exportable && unfinished.length > 0 && !assigning
+		? (
+			<button
+				className="btn btn-sm btn-outline shrink-0"
+				onClick={() => {
+					setActionError(undefined);
+					setAssignees(Object.fromEntries(
+						graphTasks.flatMap(task => {
+							let assignee = issues?.tasks[task.id]?.assignee;
+							return assignee ? [[task.id, assignee]] : [];
+						}),
+					));
+					setAssigning(true);
+				}}
+				type="button"
+			>
+				{issues?.parent ? "Create missing issues" : "Create issues"}
+			</button>
+		)
+		: exportable && outdated
+		? (
+			<button
+				className="btn btn-sm btn-outline shrink-0"
+				onClick={() => void createAll()}
+				type="button"
+			>
+				Update issues
+			</button>
+		)
+		: undefined;
+
 	let action: ReactNode;
 	function statusCard(): Card {
 		// Drafted tasks wait here for review; Approve plan approves exactly these and starts them.
+		// Handed off as GitHub issues: the parent issue shows below, and Approve plan still builds them.
+		if (look.kind === "issued") {
+			let count = snapshot?.graph?.definition.tasks.length ?? 0;
+			return {
+				title: "Handed off as issues",
+				count: plural(count, "task", "tasks"),
+				detail: (
+					<span>
+						{machineOffline
+							? `${machineOffline}. Approve plan builds these tasks on your machine once it is back.`
+							: "Each task is a GitHub issue now. Approve plan still builds them on your machine."}
+					</span>
+				),
+			};
+		}
 		if (look.kind === "review") {
 			return {
 				title: "Ready for review",
@@ -237,7 +346,7 @@ export function BuildView(
 							? "The tasks changed while you were reviewing them, so nothing was approved. Read them again, then approve."
 							: machineOffline
 							? `${machineOffline}. Approve plan builds these tasks once it is back, or on another machine you choose.`
-							: "Read the tasks below, then Approve plan builds them on your machine. Editing the document drafts them again."}
+							: "Read the tasks below. Approve plan builds them on your machine; Create issues hands them off as GitHub issues instead. Editing the document drafts them again."}
 					</span>
 				),
 			};
@@ -383,28 +492,75 @@ export function BuildView(
 	let when = buildAgo(shown, now);
 	let from = planSourceLine(shown);
 
-	if (look.kind === "review" && canEdit) {
+	if ((look.kind === "review" || look.kind === "issued") && canEdit) {
 		// An offline chosen machine holds approval here as it does in the header.
 		let blocked = look.blocked ?? machineOffline;
-		action = (
+		// Once the tasks are issues, building them is the second choice, not the first.
+		let primary = look.kind === "review";
+		let approveAndTrack = async () => {
+			let graph = snapshot?.graph;
+			if (!graph) return;
+			setCreating(true);
+			try {
+				let result = await createIssues(room, {
+					graphNumber: graph.number,
+					graphRevision: graph.revision,
+					assignees: {},
+				});
+				// Builds only once every task is tracked; otherwise the card shows what failed and
+				// offers Create missing issues.
+				if (!issuesComplete(result, graph.definition.tasks.map(task => task.id))) {
+					setActionError("Some issues weren’t made, so the build didn’t start");
+					return;
+				}
+			} catch (error) {
+				setActionError(
+					sentenceCase(error instanceof Error ? error.message : "Couldn’t create the issues"),
+				);
+				return;
+			} finally {
+				setCreating(false);
+				build.reload();
+			}
+			// Approves only the tasks on screen, which creating their issues did not change.
+			build.approve();
+		};
+		let approveButton = (
 			<button
 				aria-busy={build.busy || undefined}
 				aria-disabled={blocked || build.busy ? true : undefined}
-				className={`btn btn-sm btn-primary shrink-0${
-					!look.blocked && machineOffline ? " machine-offline" : ""
+				className={`btn btn-sm ${primary ? "btn-primary" : "btn-outline"} shrink-0${
+					blocked && blocked === machineOffline ? " machine-offline" : ""
 				}`}
 				// Offline is said in the card's text above, as the header says it only to screen readers.
 				data-tooltip={look.blocked}
 				onClick={() => {
-					if (blocked || build.busy) return;
+					if (blocked || build.busy || creating) return;
 					setActionError(undefined);
-					build.approve();
+					if (look.kind === "review" && trackIssues) void approveAndTrack();
+					else build.approve();
 				}}
 				type="button"
 			>
 				Approve plan
 			</button>
 		);
+		action = look.kind === "review"
+			? (
+				<>
+					<label className="flex items-center gap-1.5 text-text-secondary">
+						<input
+							checked={trackIssues}
+							disabled={creating}
+							onChange={event => setTrackIssues(event.target.checked)}
+							type="checkbox"
+						/>
+						Also track as GitHub issues
+					</label>
+					{approveButton}
+				</>
+			)
+			: approveButton;
 	}
 	if (phase.kind === "stopped" && canEdit && !returning) {
 		action = (
@@ -516,6 +672,7 @@ export function BuildView(
 					}}
 					blocker={report?.blocker}
 					commits={commits}
+					issue={issues?.tasks[task.id]}
 					stopped={stopped}
 					summary={report?.state === "completed" ? report.summary : undefined}
 					noChange={report?.state === "completed" ? report.noChange : undefined}
@@ -565,7 +722,28 @@ export function BuildView(
 								{card.segments.map((state, index) => <span data-state={state} key={index} />)}
 							</div>
 						)}
-						{(login || machine || from || action) && (
+						{issues?.parent && (
+							<p className="build-card-issues m-0 mt-2 flex items-center gap-2 text-sm text-text-secondary">
+								<span>
+									{issues.current
+										? "Tracked as GitHub issues"
+										: "Earlier tasks tracked as GitHub issues"}
+								</span>
+								<a
+									aria-label={`Parent issue #${issues.parent.number}`}
+									className="build-task-pr"
+									data-kind="issue"
+									data-tooltip="Parent issue"
+									href={issues.parent.url}
+									rel="noreferrer"
+									target="_blank"
+								>
+									<IssueOpenIcon />
+									#{issues.parent.number}
+								</a>
+							</p>
+						)}
+						{(login || machine || from || action || issuesAction) && (
 							<footer className="build-card-foot">
 								{login && shown && (
 									<span className="build-card-person">
@@ -588,6 +766,7 @@ export function BuildView(
 									</span>
 								)}
 								<span className="flex-1" />
+								{issuesAction}
 								{action}
 							</footer>
 						)}
@@ -635,6 +814,21 @@ export function BuildView(
 							</button>
 						</div>
 					</form>
+				)}
+				{assigning && exportable && (
+					<IssuesForm
+						assignees={assignees}
+						busy={creating}
+						onAssign={(task, value) => setAssignees(current => ({ ...current, [task]: value }))}
+						onCancel={() => setAssigning(false)}
+						onSubmit={() => void createAll()}
+						people={people}
+						tasks={unfinished}
+						issues={issues}
+					/>
+				)}
+				{issues?.problem && !issues.running && (
+					<p className="m-0 mt-2 text-sm text-destructive-ink" role="alert">{issues.problem}</p>
 				)}
 				{build.rebuildError && (look.kind === "stale" || look.kind === "failed") && (
 					build.rebuildNeedsAgent
@@ -688,6 +882,7 @@ function TaskRow(
 		blocker,
 		commits,
 		expanded,
+		issue,
 		noChange,
 		now,
 		onToggle,
@@ -701,6 +896,8 @@ function TaskRow(
 		blocker?: string;
 		commits: Array<{ sha: string; message: string; at: string }>;
 		expanded: boolean;
+		/** The GitHub issue this task was exported as, its assignee, or why that stopped short. */
+		issue?: IssueExportSnapshot["tasks"][string];
 		/** Why a finished task needed no code change, and what the agent checked to know. */
 		noChange?: { reason: string; evidence: string };
 		now: number;
@@ -743,6 +940,11 @@ function TaskRow(
 						rel="noreferrer"
 						target="_blank"
 					>
+						{pullRequest.state === "merged"
+							? <PullRequestMergedIcon />
+							: pullRequest.state === "closed"
+							? <PullRequestClosedIcon />
+							: <PullRequestOpenIcon />}
 						{pullRequest.number ? `#${pullRequest.number}` : "PR"}
 					</a>
 				)}
@@ -751,6 +953,20 @@ function TaskRow(
 						No change needed
 					</span>
 				)}
+				{issue?.number && issue.url && (
+					<a
+						aria-label={`Issue #${issue.number}`}
+						className="build-task-pr"
+						data-kind="issue"
+						data-tooltip="Issue"
+						href={issue.url}
+						rel="noreferrer"
+						target="_blank"
+					>
+						<IssueOpenIcon />
+						#{issue.number}
+					</a>
+				)}
 			</div>
 			<div className="build-task-fold" data-open={expanded || undefined} id={panel}>
 				<div inert={!expanded}>
@@ -758,6 +974,10 @@ function TaskRow(
 						<p className="m-0">
 							<InlineMarkdown source={task.goal} />
 						</p>
+						{issue?.assigned && issue.assignee && (
+							<p className="m-0">Assigned to {assigneeName(issue.assignee)}</p>
+						)}
+						{issue?.problem && <p className="m-0 text-destructive-ink">{issue.problem}</p>}
 						{summary && (
 							<p className="build-task-summary">
 								<InlineMarkdown source={summary} />
@@ -838,5 +1058,92 @@ function Linked({ text }: { text: string }) {
 				</a>
 			)
 			: part.text
+	);
+}
+
+function assigneeName(assignee: string): string {
+	return assignee === "copilot" ? "Copilot" : `@${assignee}`;
+}
+
+/** Pick who each task's issue goes to before creating them; nobody is a valid choice. */
+function IssuesForm(
+	{ assignees, busy, issues, onAssign, onCancel, onSubmit, people, tasks }: {
+		assignees: Record<string, string>;
+		busy: boolean;
+		issues?: IssueExportSnapshot;
+		onAssign: (task: string, value: string) => void;
+		onCancel: () => void;
+		onSubmit: () => void;
+		people: readonly string[];
+		tasks: Array<{ id: string; title: string }>;
+	},
+) {
+	let heading = useId();
+	let creatable = tasks.filter(task => !issues?.tasks[task.id]?.number).length;
+	return (
+		<form
+			aria-labelledby={heading}
+			className="build-return"
+			onSubmit={event => {
+				event.preventDefault();
+				onSubmit();
+			}}
+		>
+			<p className="m-0 text-sm" id={heading}>
+				{issues?.parent
+					? "Finish the issues that are missing or couldn’t be assigned."
+					: "Each task becomes a sub-issue of one issue for this document. Pick who picks each up."}
+			</p>
+			<ul className="m-0 flex list-none flex-col gap-2 p-0">
+				{tasks.map(task => {
+					let entry = issues?.tasks[task.id];
+					let value = assignees[task.id] ?? "";
+					// Option values are unique across every select on the page, the empty one included.
+					let option = (choice: string) => `${task.id}/${choice}`;
+					return (
+						<li className="flex items-center gap-2 text-sm" key={task.id}>
+							<span className="min-w-0 flex-1 truncate">
+								{entry?.number ? `#${entry.number} ` : ""}
+								<InlineMarkdown links={false} source={task.title} />
+							</span>
+							{entry?.assigned
+								? <span className="build-card-quiet">{assigneeName(entry.assignee ?? "")}</span>
+								: (
+									<select
+										aria-label={`Assignee for ${inlineText(task.title)}`}
+										className="field"
+										disabled={busy}
+										onChange={event =>
+											onAssign(task.id, event.target.value.slice(task.id.length + 1))}
+										value={option(value)}
+									>
+										<option value={option("")}>Nobody yet</option>
+										<option value={option("copilot")}>Copilot</option>
+										{[...new Set([...people, ...(value && value !== "copilot" ? [value] : [])])]
+											.map(
+												login => <option key={login} value={option(login)}>@{login}</option>,
+											)}
+									</select>
+								)}
+						</li>
+					);
+				})}
+			</ul>
+			<div className="flex gap-2">
+				<button
+					aria-busy={busy || undefined}
+					className="btn btn-md btn-primary"
+					disabled={busy}
+					type="submit"
+				>
+					{creatable > 0
+						? `Create ${plural(creatable, "issue", "issues")}`
+						: "Assign issues"}
+				</button>
+				<button className="btn btn-md btn-ghost" disabled={busy} onClick={onCancel} type="button">
+					Cancel
+				</button>
+			</div>
+		</form>
 	);
 }

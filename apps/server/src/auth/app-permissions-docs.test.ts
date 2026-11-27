@@ -7,7 +7,8 @@ const ROOT = join(import.meta.dir, "../../../..");
 /**
  * The GitHub App's repository permissions, as every guide that sets the App up lists them. Contents
  * and Pull requests are writable because machines push and open draft pull requests as their
- * owner; `machineGitHubToken` checks for both.
+ * owner; `machineGitHubToken` checks for both. Issues are writable because Create issues makes a
+ * document's tasks into issues as the writer who pressed it.
  */
 const PERMISSIONS = [
 	"Contents:        Read and write",
@@ -15,7 +16,7 @@ const PERMISSIONS = [
 	"Workflows:       Read and write",
 	"Checks:          Read-only",
 	"Commit statuses: Read-only",
-	"Issues:          Read-only",
+	"Issues:          Read and write",
 	"Metadata:        Read-only (automatic)",
 ].join("\n");
 

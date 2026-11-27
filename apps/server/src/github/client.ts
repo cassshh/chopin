@@ -16,6 +16,21 @@ export type GitHubCollaborator = {
 	avatarUrl: string;
 };
 
+/** An issue Chopin created: its database ID (for sub-issue and dependency links), number and page. */
+export type GitHubIssueRef = {
+	id: number;
+	number: number;
+	url: string;
+};
+
+export type GitHubIssueBody = GitHubIssueRef & { body: string };
+
+/** Who an issue is assigned to; Copilot's coding agent takes the repository and branch it works on. */
+export type GitHubAssignment = {
+	assignees: string[];
+	agent?: { repository: string; baseBranch?: string };
+};
+
 export type GitHubOrganizationMembership = {
 	state: "active" | "pending";
 	role: "admin" | "member" | "billing_manager";
@@ -60,7 +75,7 @@ export type GitHubInstallation = {
 		issues: boolean;
 	};
 	/** Whether it may write contents and pull requests, so its users' tokens can push and open PRs. */
-	writable?: { contents: boolean; pullRequests: boolean };
+	writable?: { contents: boolean; pullRequests: boolean; issues?: boolean };
 };
 
 export type InstallationPage = {
@@ -173,6 +188,49 @@ export interface GitHub {
 		owner: string,
 		name: string,
 	): Promise<GitHubCollaborator[]>;
+	/** Create an issue as the token's user; optional for GitHubs that never write issues. */
+	createIssue?(
+		token: string,
+		owner: string,
+		name: string,
+		input: { title: string; body: string },
+	): Promise<GitHubIssueRef>;
+	/**
+	 * Issues (not pull requests) `creator` opened or that changed since `since`, with their bodies,
+	 * newest first and bounded to three pages; used to find an issue whose creation answer was lost.
+	 */
+	issuesBy?(
+		token: string,
+		owner: string,
+		name: string,
+		query: { creator: string; since: string },
+	): Promise<GitHubIssueBody[]>;
+	/** Make the issue with database ID `child` a sub-issue of issue number `parent`. */
+	addSubIssue?(
+		token: string,
+		owner: string,
+		name: string,
+		parent: number,
+		child: number,
+	): Promise<void>;
+	/** Mark issue number `issue` as blocked by the issue with database ID `blocker`. */
+	addBlockedBy?(
+		token: string,
+		owner: string,
+		name: string,
+		issue: number,
+		blocker: number,
+	): Promise<void>;
+	/** Close an issue as not planned, as the token's user. */
+	closeIssue?(token: string, owner: string, name: string, issue: number): Promise<void>;
+	/** Assign an issue; answers the logins GitHub now has on it, which omits any it refused. */
+	addAssignees?(
+		token: string,
+		owner: string,
+		name: string,
+		issue: number,
+		assignment: GitHubAssignment,
+	): Promise<string[]>;
 	invalidate(token: string): void;
 }
 
@@ -229,6 +287,12 @@ const DEFAULTS: Endpoints = {
 };
 
 const REQUEST_TIMEOUT_MS = 15_000;
+/** Sub-issue and issue dependency endpoints are documented under this API version. */
+const ISSUE_RELATIONS_API_VERSION = "2026-03-10";
+
+function repoPath(owner: string, name: string): string {
+	return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+}
 const ACCESS_CACHE_MS = 30_000;
 const MAX_LIST_PAGES = 100;
 
@@ -338,6 +402,7 @@ function installation(value: unknown): GitHubInstallation {
 		writable: {
 			contents: permissions.contents === "write",
 			pullRequests: permissions.pull_requests === "write",
+			issues: permissions.issues === "write",
 		},
 	};
 }
@@ -504,6 +569,9 @@ function nextPage(link: string | null, api: string, path: string): number | unde
 }
 
 /** Narrow GitHub OAuth and repository API client with validated responses. */
+/** Pages of 100 a recovery listing reads before it gives up rather than guess. */
+const MAX_ISSUE_PAGES = 10;
+
 export class GitHubClient implements GitHub, GitHubReferenceSource {
 	readonly #fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 	readonly #endpoints: Endpoints;
@@ -797,6 +865,143 @@ export class GitHubClient implements GitHub, GitHubReferenceSource {
 		return collaborators;
 	}
 
+	async createIssue(
+		token: string,
+		owner: string,
+		name: string,
+		input: { title: string; body: string },
+	): Promise<GitHubIssueRef> {
+		let value = record(
+			await body(await this.#send("POST", `${repoPath(owner, name)}/issues`, token, input)),
+		);
+		if (
+			!value
+			|| typeof value.id !== "number"
+			|| typeof value.number !== "number"
+			|| typeof value.html_url !== "string"
+		) {
+			throw new GitHubError("GitHub returned an invalid issue");
+		}
+		return { id: value.id, number: value.number, url: value.html_url };
+	}
+
+	async issuesBy(
+		token: string,
+		owner: string,
+		name: string,
+		query: { creator: string; since: string },
+	): Promise<GitHubIssueBody[]> {
+		let path = `${repoPath(owner, name)}/issues`;
+		let found: GitHubIssueBody[] = [];
+		let page: number | undefined = 1;
+		let visited = new Set<number>();
+		while (page && !visited.has(page) && visited.size < MAX_ISSUE_PAGES) {
+			visited.add(page);
+			let url = new URL(path, this.#endpoints.api);
+			url.searchParams.set("creator", query.creator);
+			url.searchParams.set("since", query.since);
+			url.searchParams.set("state", "all");
+			url.searchParams.set("per_page", "100");
+			url.searchParams.set("page", String(page));
+			let response = await this.#request(url, token);
+			let list = await body(response);
+			if (!Array.isArray(list)) throw new GitHubError("GitHub returned an invalid issue list");
+			for (let entry of list) {
+				let item = record(entry);
+				if (
+					!item
+					|| item.pull_request !== undefined
+					|| typeof item.id !== "number"
+					|| typeof item.number !== "number"
+					|| typeof item.html_url !== "string"
+				) continue;
+				found.push({
+					id: item.id,
+					number: item.number,
+					url: item.html_url,
+					body: typeof item.body === "string" ? item.body : "",
+				});
+			}
+			page = nextPage(response.headers.get("link"), this.#endpoints.api, path);
+		}
+		// Recovery takes an issue missing from the list as one never made, so a list cut short (too
+		// many pages, or a page GitHub named twice) must fail rather than read as complete.
+		if (page) throw new GitHubError("GitHub listed more issues than recovery can read");
+		return found;
+	}
+
+	async addSubIssue(
+		token: string,
+		owner: string,
+		name: string,
+		parent: number,
+		child: number,
+	): Promise<void> {
+		await this.#send(
+			"POST",
+			`${repoPath(owner, name)}/issues/${parent}/sub_issues`,
+			token,
+			{ sub_issue_id: child },
+			ISSUE_RELATIONS_API_VERSION,
+		);
+	}
+
+	async addBlockedBy(
+		token: string,
+		owner: string,
+		name: string,
+		issue: number,
+		blocker: number,
+	): Promise<void> {
+		await this.#send(
+			"POST",
+			`${repoPath(owner, name)}/issues/${issue}/dependencies/blocked_by`,
+			token,
+			{ issue_id: blocker },
+			ISSUE_RELATIONS_API_VERSION,
+		);
+	}
+
+	async closeIssue(token: string, owner: string, name: string, issue: number): Promise<void> {
+		await this.#send("PATCH", `${repoPath(owner, name)}/issues/${issue}`, token, {
+			state: "closed",
+			state_reason: "not_planned",
+		});
+	}
+
+	async addAssignees(
+		token: string,
+		owner: string,
+		name: string,
+		issue: number,
+		assignment: GitHubAssignment,
+	): Promise<string[]> {
+		let value = record(
+			await body(
+				await this.#send("POST", `${repoPath(owner, name)}/issues/${issue}/assignees`, token, {
+					assignees: assignment.assignees,
+					...(assignment.agent
+						? {
+							agent_assignment: {
+								target_repo: assignment.agent.repository,
+								...(assignment.agent.baseBranch
+									? { base_branch: assignment.agent.baseBranch }
+									: {}),
+							},
+						}
+						: {}),
+				}),
+			),
+		);
+		if (!value || !Array.isArray(value.assignees)) {
+			throw new GitHubError("GitHub returned an invalid issue");
+		}
+		return value.assignees.flatMap(entry => {
+			let login = record(entry)?.login;
+			return typeof login === "string" ? [login] : [];
+		});
+	}
+
 	async repositoryAccess(
 		token: string,
 		owner: string,
@@ -956,6 +1161,48 @@ export class GitHubClient implements GitHub, GitHubReferenceSource {
 
 	async #api(path: string, token: string): Promise<unknown> {
 		return body(await this.#request(new URL(path, this.#endpoints.api), token));
+	}
+
+	/** A write; never retried, because GitHub may have done it even when the answer was lost. */
+	async #send(
+		method: "POST" | "PATCH",
+		path: string,
+		token: string,
+		payload: unknown,
+		apiVersion = "2022-11-28",
+	): Promise<Response> {
+		let response: Response;
+		try {
+			response = await this.#fetch(new URL(path, this.#endpoints.api), {
+				method,
+				headers: {
+					accept: "application/vnd.github+json",
+					authorization: `Bearer ${token}`,
+					"content-type": "application/json",
+					"user-agent": "chopin",
+					"x-github-api-version": apiVersion,
+				},
+				body: JSON.stringify(payload),
+				redirect: "error",
+				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+			});
+		} catch {
+			throw new GitHubError("GitHub API is unavailable");
+		}
+		if (response.ok) return response;
+		let status = await isRateLimited(response)
+			? 429
+			: [401, 403, 404, 410, 422].includes(response.status)
+			? response.status
+			: 502;
+		// GitHub's own reason (e.g. "Resource not accessible by integration"), short and token-free,
+		// so a refused write can be told apart in the server log.
+		let reason = "";
+		try {
+			let message = record(await response.clone().json())?.message;
+			if (typeof message === "string") reason = `: ${message.replace(/\s+/g, " ").slice(0, 160)}`;
+		} catch {}
+		throw new GitHubError(`GitHub API rejected the request${reason}`, status);
 	}
 
 	async #request(

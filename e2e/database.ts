@@ -277,6 +277,7 @@ async function seed(
 		...(state.builds ? { builds: state.builds } : {}),
 		...(state.execution ? { execution: state.execution } : {}),
 		...(state.lifecycle ? { lifecycle: state.lifecycle } : {}),
+		...(state.issues ? { issues: state.issues } : {}),
 	};
 	await sql(port, async database => {
 		await database`

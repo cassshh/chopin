@@ -323,6 +323,13 @@ test("a build's line links its pull requests and nothing else", () => {
 			{ number: "13", url: "https://github.com/o/r/pull/13" },
 			".",
 		]);
+	// An issue Create issues names is a link too.
+	let issue = "https://github.com/o/r/issues/18";
+	expect(systemParts(`@ana added 2 issues under [#18](${issue}).`)).toEqual([
+		"@ana added 2 issues under ",
+		{ number: "18", url: issue },
+		".",
+	]);
 	// Any other Markdown link, or a label that is not its pull request's number, stays as written.
 	for (
 		let text of [

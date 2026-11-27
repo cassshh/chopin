@@ -169,7 +169,7 @@ test("the machine button left of Build plan chooses where work runs, and an offl
 	// With no choice the icon shows the machine Automatic uses, an icon only, just left of Build.
 	await expect(button).toHaveAccessibleName(/^Runs on (build-box|laptop)$/);
 	await expect(button).toHaveText("");
-	let build = page.getByRole("button", { name: "Approve plan", exact: true });
+	let build = page.getByRole("button", { name: "Review plan", exact: true });
 	let at = (await button.boundingBox())!;
 	let next = (await build.boundingBox())!;
 	expect(at.x + at.width).toBeLessThanOrEqual(next.x);
@@ -209,28 +209,31 @@ test("the machine button left of Build plan chooses where work runs, and an offl
 		.toHaveText(/build-box/);
 	await page.keyboard.press("Escape");
 
-	// An offline choice stops Build plan rather than using the laptop: dimmed, still focusable,
-	// with the reason only in its accessible description.
+	// An offline choice stops Approve plan rather than using the laptop: Review plan still opens
+	// the tasks, and Build's Approve plan is dimmed, still focusable, with the reason in the card.
 	await box.disconnect();
 	await page.reload();
 	let plan = page.locator(".build-plan");
+	let card = page.getByRole("region", { name: "Build", exact: true });
+	let approve = card.getByRole("button", { name: "Approve plan", exact: true });
 	let offlineLook = async (enabled: boolean) => {
+		if (!(await card.isVisible())) await build.click();
+		await expect(plan).not.toHaveClass(/\bmachine-offline\b/);
+		await expect(build).not.toHaveAttribute("aria-disabled", "true");
 		if (enabled) {
-			await expect(plan).not.toHaveClass(/\bmachine-offline\b/);
-			await expect(build).not.toHaveAttribute("aria-disabled", "true");
+			await expect(approve).not.toHaveClass(/\bmachine-offline\b/);
+			await expect(approve).not.toHaveAttribute("aria-disabled", "true");
 		} else {
-			await expect(plan).toHaveClass(/\bmachine-offline\b/);
-			await expect(build).toHaveAttribute("aria-disabled", "true");
+			await expect(approve).toHaveClass(/\bmachine-offline\b/);
+			await expect(approve).toHaveAttribute("aria-disabled", "true");
 		}
 	};
 	await offlineLook(false);
 	await expect(button).toHaveClass(/\bmachine-offline\b/);
-	await expect(build).toHaveAccessibleDescription("build-box is offline");
-	await expect(build).not.toHaveAttribute("disabled");
-	await expect(build).not.toHaveAttribute("data-tooltip");
-	await expect(plan).toHaveText("Approve plan");
-	await build.focus();
-	await expect(build).toBeFocused();
+	await expect(card).toContainText("build-box is offline");
+	await expect(approve).not.toHaveAttribute("disabled");
+	await approve.focus();
+	await expect(approve).toBeFocused();
 	// Pressing it starts nothing and says nothing.
 	let posted: string[] = [];
 	let record = (request: import("@playwright/test").Request) => {
@@ -238,12 +241,12 @@ test("the machine button left of Build plan chooses where work runs, and an offl
 		if (request.method() === "POST" && /implementation|build/.test(path)) posted.push(path);
 	};
 	page.on("request", record);
-	await plan.click({ force: true });
+	await approve.click({ force: true });
 	await page.keyboard.press("Enter");
 	await page.waitForTimeout(500);
 	page.off("request", record);
 	expect(posted).toEqual([]);
-	await expect(plan).toHaveText("Approve plan");
+	await expect(plan).toHaveText("Review plan");
 	await expect(page.getByRole("alert").filter({ hasText: /offline/i })).toHaveCount(0);
 	await crop(page, [button, plan], "desktop-build-offline");
 	// The list shows the chosen machine offline and not choosable.
@@ -255,7 +258,7 @@ test("the machine button left of Build plan chooses where work runs, and an offl
 	await shoot(page, "desktop-machine-offline");
 	await page.keyboard.press("Escape");
 
-	// The machine reconnecting enables Build plan again, as choosing another connected one does.
+	// The machine reconnecting enables Approve plan again, as choosing another connected one does.
 	await box.reconnect();
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await offlineLook(true);
@@ -341,8 +344,10 @@ test("a chosen machine going offline and coming back shows within seconds, witho
 	let box = await connected(page, "build-box");
 	let laptop = await connected(page, "laptop");
 	await page.reload();
-	let build = page.getByRole("button", { name: "Approve plan", exact: true });
-	let plan = page.locator(".build-plan");
+	// Review plan opens Build, whose Approve plan starts the tasks on the chosen machine.
+	await page.getByRole("button", { name: "Review plan", exact: true }).click();
+	let build = page.getByRole("region", { name: "Build", exact: true })
+		.getByRole("button", { name: "Approve plan", exact: true });
 	let entry = page.getByRole("complementary", { name: "Projects" })
 		.getByRole("button", { name: /^Machines/ });
 	await (await runOn(page)).getByRole("menuitemradio", { name: /^build-box/ }).click();
@@ -352,20 +357,19 @@ test("a chosen machine going offline and coming back shows within seconds, witho
 	await shoot(page, "live-before-full");
 
 	// The machine stops. Nothing reloads the page or refocuses its window, and within five seconds
-	// Build plan greys and the sidebar counts one connected.
+	// Approve plan greys and the sidebar counts one connected.
 	let live = { timeout: 5_000 };
 	await box.disconnect();
 	await expect(build).toHaveAttribute("aria-disabled", "true", live);
-	await expect(build).toHaveAccessibleDescription("build-box is offline");
-	await expect(plan).toHaveClass(/\bmachine-offline\b/);
+	await expect(build).toHaveClass(/\bmachine-offline\b/);
 	await expect(entry).toHaveAccessibleName("Machines, 1 of 2 connected", live);
 	await expect(entry).toContainText("1/2");
 	await shoot(page, "live-offline-full");
 
-	// It comes back, and so does Build plan.
+	// It comes back, and so does Approve plan.
 	await box.reconnect();
 	await expect(build).not.toHaveAttribute("aria-disabled", "true", live);
-	await expect(plan).not.toHaveClass(/\bmachine-offline\b/);
+	await expect(build).not.toHaveClass(/\bmachine-offline\b/);
 	await expect(entry).toHaveAccessibleName("Machines, 2 connected", live);
 
 	// On the Machines page, the sidebar's count follows the table.
@@ -1036,7 +1040,7 @@ test("the machine button shows only while the person has a paired machine, appea
 	let chat = composer(page).getByRole("button", { name: /^Runs on/ });
 	let header = machineButton(page);
 	let send = composer(page).getByRole("button", { name: "Send message" });
-	let build = page.getByRole("button", { name: "Approve plan", exact: true });
+	let build = page.getByRole("button", { name: "Review plan", exact: true });
 	// No machine paired: no selector in Chat or beside Build plan, and no prompt to add one there
 	// either.
 	await expect(build).toBeVisible();

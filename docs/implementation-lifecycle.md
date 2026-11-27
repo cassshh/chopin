@@ -54,16 +54,21 @@ necessary decisions and investigations in the document and explain them in Chat.
 It never claims an owner or runs an investigation.
 
 Build plan's draft never starts by itself. Once the Planner has saved the tasks,
-the slot reads **Approve plan** and the Build tab opens on a **Ready for review**
-card listing them; nothing is approved and the graph stays a draft. Reading the
-tasks and pressing **Approve plan** (in the header or on the card) sends the
+the slot reads **Review plan** and the Build tab opens on a **Ready for review**
+card listing them; nothing is approved and the graph stays a draft. **Review plan**
+only opens Build, so the two ways on from the tasks, **Approve plan** and **Create
+issues**, are seen side by side. Pressing **Approve plan** on the card sends the
 reviewed graph version and revision to `POST /api/channels/:id/implementation`,
 which approves exactly that draft and queues it in one durable commit, with the
 same refusals as before (machine offline, no workspace, accepted comments,
-required investigations). An edit to the document before approval makes the
+required investigations). With **Also track as GitHub issues** ticked beside it,
+the press first makes the tasks issues (as [Export as GitHub issues](#export-as-github-issues)
+describes, with no assignees) and then approves the same version, so the build's
+pull requests can close them. An edit to the document before approval makes the
 draft stale: the slot goes back to **Build plan**, which drafts the tasks again,
 and an approval of the stale tasks is refused. A chosen machine that is offline
-dims both buttons, as it did the one-click press.
+dims the card's **Approve plan** and says why on the card; **Review plan** stays
+pressable, since reading the tasks needs no machine.
 
 After Approve plan the same slot becomes a status capsule:
 **Breaking into tasks…**, **Building 3 of 8**, **Built**, **N changes to
@@ -283,6 +288,76 @@ Direct `read_implementation` remains available for an archived document.
 `start_implementation` refuses it with `document-archived`, while reports for a
 run that started before archival remain accepted under the normal run and graph
 checks.
+
+## Export as GitHub issues
+
+A drafted or built graph can also end in work items instead of a local build. Once tasks exist and
+no build is running, a writer sees **Create issues** on the Build tab's status card: at review it
+sits beside **Approve plan**, as the other way on from the drafted tasks. After the export the header
+reads **Issues in #N** with **Approve plan** as a secondary action, and the card **Handed off as
+issues**, so the same tasks can still be built on a machine. It lists the
+tasks with an assignee for each: nobody, Copilot (Copilot coding agent, which must be enabled on the
+repository), or a repository collaborator. Pressing **Create N issues** sends
+`POST /api/channels/:id/implementation/issues`, which:
+
+1. checks the origin, the presser's write access and the document (not archived, not a child), and
+   that the shown graph version and revision are still the latest;
+2. stores the intent (graph version, the presser, the assignees) in the sidecar's `issues` record
+   before anything reaches GitHub;
+3. with the presser's GitHub App user token, creates one parent issue for the document, then one
+   issue per task in dependency order, makes each a sub-issue of the parent, adds a "blocked by"
+   link for each dependency, and assigns it; each result is committed before the next step.
+
+The parent carries the document link, the answered decisions with their why, and the decisions
+still open. A task's issue carries its context, goal, acceptance criteria as a checklist and the
+issues it depends on. Every body ends with a hidden `<!-- chopin:<document>:<task> -->` marker.
+
+A step that fails is recorded on its task in plain words and the others go ahead; pressing
+**Create missing issues** again does only what is missing, so an issue Chopin recorded is never
+created twice. A GitHub refusal is the task's problem; a failure to save what GitHub made ends the
+press before anything is linked to it. Each press that leaves something unmade is
+remembered with its presser and start (`unresolved`, at most 10, cleared once every issue is
+recorded). Before it makes anything, the next press lists each of those presser's own issues since
+their press and takes back, by its marker, any issue made but never recorded (its answer lost, or
+its save failed), so it is not made a second time, whoever presses again. Only those people's
+issues are looked at, so a marker someone else writes into an issue is never taken. A listing that
+fails, or that GitHub cuts short (more than 10 pages of 100), ends the press with nothing made, since it can't tell whether the issue exists. An export is
+refused while a build of the tasks is queued or running, and a build, a rebuild or a coding agent's
+claim waits while an export runs, so no build reads half-made issue links.
+
+A task removed from the graph since the last export has its issue closed as not planned by the next
+press (Create missing issues, or Approve plan with **Also track as GitHub issues**), and Chat says
+how many were closed. Until GitHub confirms the close, the issue stays in the export's `removed`
+list (at most 500; a press that would exceed it is refused rather than forget one), so a refused
+close is tried again, and a task that comes back meanwhile takes its issue back instead of getting a
+new one. Nothing closes an issue without a press: the Planner revising the
+tasks never writes to GitHub. When every task already has its issue but the export is for older
+tasks (one removed, a dependency added) or stopped short (a close GitHub refused, or sub-issue and
+blocked-by links an interrupted press left unmade, which the snapshot reports as `pending`), the card offers
+**Update issues**, which presses at once, with no assignees to pick. A task ID
+longer than 128 characters, or `__proto__`, is refused before anything is kept, and a revised
+task keeps only the blocked-by links of its current dependencies. Issues already made for a task keep their link when the graph is revised and the
+task keeps its ID; edits to the task do not reach its issue, and a removed task's issue is closed
+(below). One export per document runs at a
+time.
+
+This needs the App's Issues permission at **Read and write**. GitHub also lists Actions read and
+write for assigning Copilot; without it only that assignment fails, and its task says so. The
+Planner never writes issues. The record lives in `apps/server/src/tasks/issues.ts` and is restored
+strictly: an invalid stored export rejects the document rather than being dropped. **Handed off as
+issues** shows only once the parent and every task's issue exist; with **Also track as GitHub
+issues**, Approve plan starts the build only when the export made all of them, and otherwise leaves
+the failures on the card for **Create missing issues**.
+
+With Issues only **Read**, GitHub still lets the App open and link issues on a repository whose
+issues the presser can write, but refuses to assign them. Chopin checks the installation's
+permissions before it starts: it makes and links the issues, skips every assignment, and records
+on the export that the issues are made but not assigned, with what to change (Issues: Read and
+write, accepted on the installation) before pressing **Create missing issues**.
+
+A build of tasks that have issues hands the coding agent their numbers: `read_implementation`,
+on a paired machine and on `/mcp` alike, returns `issues` (the parent and each task's issue number and URL), and the agent is told to
+write `Closes #<number>` in the body of the task's pull request, so merging it closes the issue.
 
 ## Lock behavior
 

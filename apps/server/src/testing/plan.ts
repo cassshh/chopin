@@ -27,6 +27,8 @@ export type SeedState = {
 	parent?: string;
 	/** Seed the sidecar marker of a decision's page. */
 	questionPage?: { recordId: string };
+	/** The GitHub issues the tasks were exported as. */
+	issues?: import("../tasks/issues").IssueExport;
 };
 
 export function storedQuestion(definition: Definition): number[] {

@@ -63,7 +63,7 @@ Pull requests:   Read and write
 Workflows:       Read and write
 Checks:          Read-only
 Commit statuses: Read-only
-Issues:          Read-only
+Issues:          Read and write
 Metadata:        Read-only (automatic)
 ```
 

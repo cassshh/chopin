@@ -83,6 +83,40 @@ export async function stopBuild(room: string, id: string): Promise<void> {
 	);
 }
 
+/**
+ * Create GitHub issues for the shown graph version's tasks: a parent and a sub-issue per task, with
+ * the assignee picked for each (a login, `copilot`, or null). Answers once every step was tried.
+ */
+/** What an export made: the parent, and each task's issue or what stopped it. */
+export type IssuesResult = {
+	parent?: { number: number; url: string };
+	/** An issue still waits for its sub-issue or blocked-by link. */
+	pending?: true;
+	tasks: Record<string, { number?: number; url?: string; problem?: string }>;
+};
+
+/**
+ * Whether an export made the parent and an issue for every one of `taskIds`, with no problem and no
+ * link left to make.
+ */
+export function issuesComplete(result: IssuesResult, taskIds: string[]): boolean {
+	return !!result.parent && !result.pending
+		&& taskIds.every(id => result.tasks[id]?.number !== undefined && !result.tasks[id]?.problem);
+}
+
+export async function createIssues(
+	room: string,
+	input: { graphNumber: number; graphRevision: number; assignees: Record<string, string | null> },
+): Promise<IssuesResult> {
+	return await implementationResponse<IssuesResult>(
+		await fetch(`${implementationEndpoint(room)}/issues`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(input),
+		}),
+	);
+}
+
 /** Build the edits since the last build onto its pull requests, on the viewer's own agent. */
 export async function rebuildChanges(room: string): Promise<void> {
 	await implementationResponse(
