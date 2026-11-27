@@ -211,11 +211,12 @@ test("your computer: one copied command installs chopin, which pairs only a mach
 	await dialog.getByRole("button", { name: "macOS", exact: true }).click();
 	await expect.poll(command).toBe(setupCommand(origin, "sh", findAgent("copilot")));
 
-	// What the machine needs reads as one line: chopin installs the agent in its microVMs, and a
-	// Mac can't run them.
+	// What the machine needs reads as one line: chopin installs the agent in its microVMs, which
+	// on a Mac are Apple Virtualization's.
 	await expect(dialog.locator(".machines-needs")).toHaveText(
-		"A Mac can't run Chopin's work: chopin runs each agent in a microVM of its own, which needs "
-			+ "Linux or Windows on x86_64 with hardware virtualization.",
+		"Needs Apple silicon and chopin's Apple Virtualization package, built once on the Mac "
+			+ "(experimental): chopin runs GitHub Copilot CLI in a microVM of its own and installs "
+			+ "it there.",
 	);
 	await dialog.getByRole("button", { name: "Windows", exact: true }).click();
 	await expect(dialog.locator(".machines-needs")).toHaveText(
