@@ -70,7 +70,7 @@ for (let [device, use] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
 		// What the machine needs comes first: a Mac runs its microVMs with Apple Virtualization.
 		await page.getByRole("button", { name: "macOS", exact: true }).click();
 		await expect(page.locator(".machines-needs")).toContainText(
-			"Needs Apple silicon and chopin's Apple Virtualization package",
+			"Needs Apple silicon (experimental)",
 		);
 		await page.getByRole("button", { name: "Linux", exact: true }).click();
 		await expect(page.locator(".machines-needs p").first()).toHaveText(

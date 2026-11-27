@@ -86,8 +86,8 @@ export function shellPlace(shell: SetupShell) {
 
 /**
  * What a machine of `system` needs to run Chopin's work, which runs each agent in a microVM of its
- * own: a Mac needs Apple silicon and chopin's Apple Virtualization package, and Linux or Windows on
- * x86_64 needs its hypervisor. chopin installs a built-in agent there itself; a setup agent's own
+ * own: a Mac needs Apple silicon (chopin installs its Apple Virtualization package itself), and
+ * Linux or Windows on x86_64 needs its hypervisor. chopin installs a built-in agent there itself; a setup agent's own
  * steps say how it is installed.
  */
 function platformNeeds(system: SetupSystem, agent: string, installs: boolean): string {
@@ -95,8 +95,7 @@ function platformNeeds(system: SetupSystem, agent: string, installs: boolean): s
 		installs ? " and installs it there" : ""
 	}.`;
 	return system === "macos"
-		? `Needs Apple silicon and chopin's Apple Virtualization package, built once on the Mac `
-			+ `(experimental): ${runs}`
+		? `Needs Apple silicon (experimental): ${runs}`
 		: `Needs ${
 			system === "windows" ? "the Windows Hypervisor Platform turned on" : "KVM"
 		}, on x86_64: ${runs}`;

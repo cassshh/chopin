@@ -1109,8 +1109,8 @@ restart). Windows hosts are not yet ready for work: what is left is in
 [Agents in NVX microVMs](nvx-sandbox.md#windows).
 
 **macOS** on Apple silicon runs the same microVMs with Apple's Virtualization
-framework instead of NVX, which has no macOS backend (experimental: its package is
-built once on the Mac, see [Apple Virtualization](vz-sandbox.md)). An **Intel Mac**
+framework instead of NVX, which has no macOS backend (experimental; `chopin`
+installs its package itself, see [Apple Virtualization](vz-sandbox.md)). An **Intel Mac**
 and **Linux or Windows on Arm** can't run Chopin's work: NVX boots x86_64 guests
 under KVM, MSHV or WHP, none of which they have. `chopin` installs on them, and
 says so when it would pair or connect.

@@ -92,8 +92,8 @@ whose WHP is off fails its first microVM, which says so.
   what it said, as above. Pairing and the routes that hand out nothing still answer
   older connectors, so they can update.
 - **Add machine** on the Machines page says what a machine needs (KVM, or the
-  Windows Hypervisor Platform, on x86_64, or Apple silicon with chopin's Apple
-  Virtualization package on a Mac) instead of the agent's host install.
+  Windows Hypervisor Platform, on x86_64, or Apple silicon on a Mac) instead of the
+  agent's host install.
 
 A machine that loses what NVX needs while connected (logind takes back the access to
 `/dev/kvm` a desktop login gave its user, the user leaves the `kvm` group, WHP is

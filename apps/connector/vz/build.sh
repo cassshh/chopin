@@ -1,23 +1,39 @@
 #!/bin/sh
 # Builds chopin's Apple Virtualization package for a Mac on Apple silicon: bin/chopin-vz, the helper
 # that starts each microVM, and guest/, the arm64 kernel, initramfs and Ubuntu base layer its guests
-# boot. With no argument it installs the package where the connector looks for it, in its state
-# directory (<state>/vz/<version>), so `chopin connect` and the chopin service find it by
-# themselves. With a folder as $1 it builds there instead, for CHOPIN_VZ_ROOT to name.
+# boot.
+#
+#   build.sh                    installs the package where the connector looks for it, in its state
+#                               directory (<state>/vz/<version>), for work on the package itself
+#   build.sh <folder>           builds it there instead, for CHOPIN_VZ_ROOT to name
+#   build.sh --archive [folder] writes it as the one archive a release publishes (VZ_RELEASE.file in
+#                               src/nvx.ts) into the folder, the current one by default, and prints
+#                               its SHA-256, which VZ_RELEASE pins
 #
 # Needs Xcode's command line tools (swiftc, codesign) and Docker (for the guest half, built in an
 # arm64 Ubuntu container).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-# The package's version, as the connector pins it (VZ_RELEASE in src/nvx.ts).
-version=$(sed -n 's/^export const VZ_RELEASE = { version: "\([^"]*\)" } as const;$/\1/p' "$here/../src/nvx.ts")
-[ -n "$version" ] || {
+# The package's version and archive name, as the connector pins them (VZ_RELEASE in src/nvx.ts).
+pinned() {
+	sed -n '/^export const VZ_RELEASE = {$/,/^} as const;$/p' "$here/../src/nvx.ts" |
+		sed -n "s/^	$1: \"\([^\"]*\)\",\$/\1/p"
+}
+version=$(pinned version)
+file=$(pinned file)
+[ -n "$version" ] && [ -n "$file" ] || {
 	echo "build.sh couldn't read the package's version from src/nvx.ts." >&2
 	exit 1
 }
-# The connector's state directory, as `stateDirectory` in src/workspace.ts finds it.
-state="${CHOPIN_HOME:-${CHOPIN_CONNECTOR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/chopin/connector}}"
-target="${1:-$state/vz/$version}"
+archive=
+if [ "${1:-}" = --archive ]; then
+	archive=$(mkdir -p "${2:-.}" && cd "${2:-.}" && pwd)
+	target=$(mktemp -d)
+else
+	# The connector's state directory, as `stateDirectory` in src/workspace.ts finds it.
+	state="${CHOPIN_HOME:-${CHOPIN_CONNECTOR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/chopin/connector}}"
+	target="${1:-$state/vz/$version}"
+fi
 out=$(mkdir -p "$target" && cd "$target" && pwd)
 kernel="${KERNEL:-7.0.0-44-generic}"
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || {
@@ -48,7 +64,14 @@ docker run --rm --platform linux/arm64 -e KERNEL="$kernel" \
 	sh /build-inside.sh
 
 (cd "$out" && find bin guest -type f ! -name SHA256SUMS | sort | xargs shasum -a 256 > SHA256SUMS)
-if [ -n "${1:-}" ]; then
+if [ -n "$archive" ]; then
+	# The generated pins are for src/guest-packages-arm64.ts, not for a guest.
+	cp "$out/guest/guest-packages.json" "$archive/guest-packages.json"
+	tar -czf "$archive/$file" -C "$out" bin guest SHA256SUMS
+	rm -rf "$out"
+	echo "✓ Wrote $archive/$file"
+	echo "  SHA-256 (for VZ_RELEASE.sha256): $(shasum -a 256 "$archive/$file" | cut -d' ' -f1)"
+elif [ -n "${1:-}" ]; then
 	echo "✓ Built into $out. Use it with: CHOPIN_VZ_ROOT=$out chopin connect"
 else
 	# What tells the connector the package in its state directory is whole.

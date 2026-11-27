@@ -6,8 +6,7 @@ x86_64 guests only. It is the same model as [NVX microVMs](nvx-sandbox.md): one
 microVM per launch, booted from an image's EROFS layer, shown only its shares,
 with the connector's allow-list proxy as its only way out. Everything above the
 seam (runs, Planners, spares, images, disks, the proxy, the AI relay, Chopin's
-checks) is unchanged. This is an experimental engine: its package is built on
-the Mac itself, not downloaded.
+checks) is unchanged. This is an experimental engine.
 
 ## How it fits the seam
 
@@ -25,7 +24,7 @@ every host. What differs is chosen by the hypervisor, `vz`:
 | Guest             | x86_64, NVX's kernel and Ubuntu layer    | arm64, Ubuntu's kernel and a base layer of its own      |
 | Image recipe      | x86_64 Node, `GUEST_PACKAGES`            | arm64 Node, `ARM64_GUEST_PACKAGES` (`images.ts` `arch`) |
 | What Chopin hears | `{ engine: "nvx", hypervisor }`          | `{ engine: "vz", hypervisor: "vz" }`                    |
-| Package           | Downloaded, pinned (`NVX_RELEASE`)       | Built on the Mac with `apps/connector/vz/build.sh`      |
+| Package           | Downloaded, pinned (`NVX_RELEASE`)       | Downloaded, pinned (`VZ_RELEASE`)                       |
 
 Chopin takes either report as a connector that runs its agents in microVMs
 (`runsMicrovms` in `packages/protocol/connector.ts`); the Machines page says
@@ -83,11 +82,6 @@ decides as it does for NVX.
   when the microVM starts, since virtio-fs shares folders: a change to the host's
   file after that isn't seen.
 - **`--mount-write`** isn't supported; `vmSpec` never asks for it.
-- **The package** isn't downloaded or pinned yet: `build.sh` builds it on the Mac and
-  installs it in the connector's state directory (`<state>/vz/<version>`), where
-  `chopin connect` and the chopin service find it. `CHOPIN_VZ_ROOT` names one built
-  elsewhere (`build.sh <folder>`). Its base layer gets a new UUID with each build, so
-  images are rebuilt after one.
 - NVX's start retry (OpenVMM's io_uring failure), its run folders and its
   device-denied detection have nothing to do on a Mac.
 
@@ -119,12 +113,36 @@ decides as it does for NVX.
   CHOPIN_VZ_ROOT=~/chopin-vz bun run e2e connector-vz.e2e.ts
   ```
 
+## Shipping the package
+
+A `chopin` pins one package (`VZ_RELEASE` in `nvx.ts`): its version, its release's tag,
+its archive's name and SHA-256, as it pins NVX's. The first time a Mac needs it,
+`chopin` downloads the archive (about 60 MB, 130 MB unpacked) from that release's
+asset on GitHub, checks the pin and each file against the package's own
+`SHA256SUMS`, unpacks it into `<state>/vz/<version>/` and removes versions it no
+longer pins. Nothing else is asked of the Mac: no checkout, Docker or Xcode.
+
+Releasing one is done by hand, on a Mac on Apple silicon with Docker and Xcode's
+command line tools:
+
+1. Set the new `version`, `tag` and `file` in `VZ_RELEASE`.
+2. `apps/connector/vz/build.sh --archive <folder>` writes the archive and prints its
+   SHA-256; put that in `VZ_RELEASE.sha256`. It also writes `guest-packages.json`, the
+   arm64 packages `guest-packages-arm64.ts` pins, which change with the base layer.
+3. Publish the archive as that tag's release asset. A published archive is never
+   replaced: a rebuild makes a new base layer, so another SHA-256, and is a new version.
+
+`build.sh` with no argument installs a package built from the checkout where the
+connector looks instead, and `build.sh <folder>` builds one for `CHOPIN_VZ_ROOT` to
+name: both are for work on the package itself. The helper is signed ad hoc with its
+entitlement; whether that signature is enough on a Mac other than the one that built
+it has not been tried yet.
+
 ## Trying it
 
 From a checkout of this branch (the released `chopin` binaries don't carry it yet):
 
 ```sh
-apps/connector/vz/build.sh
 bun apps/connector/src/main.ts connect --agent atomic
 ```
 
