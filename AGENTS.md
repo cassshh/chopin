@@ -757,21 +757,25 @@ plan can approve and dispatch a graph through the owner-paired ACP connector;
 its run-scoped bridge exposes the document and lifecycle reporting tools. The
 Planner cannot approve, lock, or start a graph. See docs/local-launcher.md.
 
-Open or reopened decisions never block a build. **Build plan**, **Build** and
-**Retry** go ahead: the coding agent builds on its best judgment, reads each
+Open or reopened decisions never block a build. **Build plan**, **Approve plan**,
+**Build** and **Retry** go ahead: the coding agent builds on its best judgment, reads each
 unanswered decision as `unapprovedDecisions` (in `read_implementation` and
 `read_rebuild`), and is told to put that list in the body of every pull request
 it opens. The decisions stay open and answerable once the active build releases
 its lock; building never answers or closes one.
 
-A person's press is the approval. **Build plan** approves and starts the
-drafted graph. Once a build has delivered, with or without `LIVE_BUILD`, a
+A person's press is the approval, in two steps for a first build: **Build plan**
+asks the Planner for tasks and stops; the drafted graph waits in the Build tab
+for review, still a draft (invisible and unclaimable to MCP), and an edit to the
+document makes it stale. **Approve plan** approves exactly the reviewed draft and
+starts it through the same `POST /api/channels/:id/implementation` that queues a
+build. Once a build has delivered, with or without `LIVE_BUILD`, a
 rebuild appends its tasks as an approved, completed graph version from the
 coding agent's report, with no separate review: without `LIVE_BUILD` that
 approval is the person pressing **Build** (or **Retry**) on the changes, which
 the server refuses while accepted comments await plan changes or required
 investigations are open, but never for an open decision; under
-`LIVE_BUILD` it is the Build plan press that made the document live.
+`LIVE_BUILD` it is the Approve plan press that made the document live.
 
 An approved graph binds one plan revision, graph version, and graph revision.
 `start_implementation` atomically claims those values and locks the graph. Task,

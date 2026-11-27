@@ -179,8 +179,9 @@ export type ImplementationSnapshot = {
 	 */
 	waitingForDocument?: { title?: string };
 	/**
-	 * A one-click Build plan is waiting for its tasks: `by` (a user id) pressed it at `revision`.
-	 * It survives a reload, and any blocker that remains, until the build starts or is cancelled.
+	 * An older client's one-click Build plan is waiting for its tasks: `by` (a user id) pressed it at
+	 * `revision`. It survives a reload, and any blocker that remains, until the build starts or is
+	 * cancelled. The current web drafts for review and never sets it.
 	 */
 	buildRequested?: { by: string; revision: number };
 	lifecycle: Pick<Plan.Lifecycle, "execution" | "activity" | "history">;
@@ -206,7 +207,10 @@ export declare namespace Implementation {
 		requestId: string;
 		/** The revision the asker saw; the server drafts against its current revision. */
 		planRevision: number;
-		/** Asked by the one-click Build plan, which starts the tasks once they are drafted. */
+		/**
+		 * Asked by an older client's one-click Build plan, which starts the tasks once they are
+		 * drafted. The current web leaves it out: its tasks wait for Approve plan.
+		 */
 		build?: true;
 	};
 

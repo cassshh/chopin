@@ -27,15 +27,20 @@ function offline(error: unknown): boolean {
 	return error instanceof ApiError && error.status === 409 && error.message === "no-workspace";
 }
 
+/** The document and graph revisions a person reviewed, which Approve plan approves and nothing newer. */
+export type Reviewed = { planRevision: number; graphVersion: number; graphRevision: number };
+
 /**
  * Approve the snapshot's tasks and start building them on the viewer's local agent.
  *
- * The one place the browser starts a build. `needs-agent` means no connected
- * agent could take it; any other refusal throws.
+ * The one place the browser starts a build. With `reviewed`, the server approves exactly the
+ * revisions the person saw and refuses the start if the tasks changed since. `needs-agent` means
+ * no connected agent could take it; any other refusal throws.
  */
 export async function startBuild(
 	room: string,
 	snapshot: ImplementationSnapshot,
+	reviewed?: Reviewed,
 ): Promise<"started" | "needs-agent"> {
 	let graph = snapshot.graph;
 	if (!graph) throw new ApiError("There are no tasks to build", 409);
@@ -47,9 +52,9 @@ export async function startBuild(
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
 					...(snapshot.build ? { retryOf: snapshot.build.id } : {}),
-					planRevision: snapshot.planRevision,
-					graphVersion: graph.number,
-					graphRevision: graph.revision,
+					planRevision: reviewed?.planRevision ?? snapshot.planRevision,
+					graphVersion: reviewed?.graphVersion ?? graph.number,
+					graphRevision: reviewed?.graphRevision ?? graph.revision,
 				}),
 			}),
 		);

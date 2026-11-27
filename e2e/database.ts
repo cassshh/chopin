@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { SQL } from "bun";
 import { e2ePort } from "./ports";
 import { ulid, withDocumentTitle } from "../packages/dialect/src/index";
-import { storedDocument, storedLegacyCallout } from "../apps/server/src/testing/plan";
+import {
+	builtVersionsApproved,
+	storedDocument,
+	storedLegacyCallout,
+} from "../apps/server/src/testing/plan";
 
 import type { SeedState } from "../apps/server/src/testing/plan";
 
@@ -269,7 +273,7 @@ async function seed(
 		openQuestions: state.openQuestions ?? [],
 		threads: state.threads ?? [],
 		transcript: state.transcript ?? [],
-		...(state.graph ? { graph: state.graph } : {}),
+		...(state.graph ? { graph: builtVersionsApproved(state.graph, state.builds) } : {}),
 		...(state.builds ? { builds: state.builds } : {}),
 		...(state.execution ? { execution: state.execution } : {}),
 		...(state.lifecycle ? { lifecycle: state.lifecycle } : {}),

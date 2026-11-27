@@ -26,6 +26,7 @@ import {
 } from "./build-model";
 import { ApiError } from "./api";
 import { cancelBuildRequest, rebuildChanges, startBuild } from "./build-start";
+import type { Reviewed } from "./build-start";
 import { useImplementationSnapshot } from "./implementation-snapshot";
 import { BuildBlockerGlyph } from "./build-blocker-glyph";
 import { buildBlockerSummary } from "./build-blockers";
@@ -64,8 +65,17 @@ export type BuildPlan = {
 	needsAgent: boolean;
 	/** A press is drafting or starting the build, so another press would do nothing. */
 	busy: boolean;
-	/** Build plan, or Retry after a first build stopped. */
+	/** Build plan: draft the tasks for review. */
 	press: () => void;
+	/** Approve plan: approve the reviewed tasks and start building them. */
+	approve: () => void;
+	/** Retry after a first build stopped: start the tasks again, or draft them when there are none. */
+	retry: () => void;
+	/**
+	 * The last Approve plan found the tasks changed since they were shown, so it approved nothing:
+	 * they must be reviewed again.
+	 */
+	reviewChanged: boolean;
 	/** Build the changes since the last build, or retry a failed one. */
 	rebuild: () => void;
 	/** Why the last Build or Retry of changes was refused. */
@@ -77,9 +87,9 @@ export type BuildPlan = {
 };
 
 /**
- * Read the document's build and run Build plan's one press: ask the Planner for
- * tasks, then start them on the viewer's local agent. Nothing else sends
- * `implementation:draft`, so opening Build never spends a Planner turn.
+ * Read the document's build and run its two presses: Build plan asks the Planner for tasks and
+ * stops for review; Approve plan approves those tasks and starts them on the viewer's local agent.
+ * Nothing else sends `implementation:draft`, so opening Build never spends a Planner turn.
  */
 export function useBuildPlan(
 	{
@@ -119,6 +129,9 @@ export function useBuildPlan(
 	});
 	let [state, dispatch] = useReducer(advanceFirstBuild, { stage: "idle" } as FirstBuild);
 	let [rebuilding, setRebuilding] = useState(false);
+	// What the person saw when they pressed Approve plan; the start approves exactly that.
+	let reviewed = useRef<Reviewed>(undefined);
+	let [reviewChanged, setReviewChanged] = useState(false);
 	let [rebuildError, setRebuildError] = useState<string>();
 	let [rebuildNeedsAgent, setRebuildNeedsAgent] = useState(false);
 	let draftId = useRef<string>(undefined);
@@ -127,10 +140,12 @@ export function useBuildPlan(
 		dispatch({ type: "reset" });
 	}, [room]);
 
-	// A built document counts its edits since the build, so edits reload it, throttled.
+	// A built document counts its edits since the build, and tasks under review go stale with the
+	// document, so edits reload it, throttled. This browser's own edits arrive as acks.
 	let built = !!snapshot && hasBuilt(snapshot);
+	let reviewing = !!snapshot && buildPhase(snapshot).kind === "review";
 	useEffect(() => {
-		if (!enabled || !built) return;
+		if (!enabled || !built && !reviewing) return;
 		let timer: number | undefined;
 		let edited = () => {
 			timer ??= window.setTimeout(() => {
@@ -143,7 +158,7 @@ export function useBuildPlan(
 			off.forEach(remove => remove?.());
 			window.clearTimeout(timer);
 		};
-	}, [enabled, built, wire]);
+	}, [enabled, built, reviewing, wire]);
 
 	// Whether the draft turn left tasks to start is only known from a fresh read.
 	let drafted = async () => {
@@ -192,7 +207,6 @@ export function useBuildPlan(
 			void wire.ask<Implementation.Drafted>("implementation:draft", {
 				requestId: crypto.randomUUID(),
 				planRevision: snapshot.planRevision,
-				build: true,
 			}).then(answer => {
 				draftId.current = answer.id;
 				if (answer.state === "ended") void drafted();
@@ -206,7 +220,9 @@ export function useBuildPlan(
 		}
 		if (!snapshot) return;
 		dispatch({ type: "start" });
-		startBuild(room, snapshot).then(result => {
+		let approving = reviewed.current;
+		reviewed.current = undefined;
+		startBuild(room, snapshot, approving).then(result => {
 			if (result === "started") {
 				dispatch({ type: "started" });
 				reload();
@@ -242,17 +258,60 @@ export function useBuildPlan(
 			setRebuildNeedsAgent(false);
 		}
 	}, [look.kind]);
+	/**
+	 * Approve exactly the tasks on screen. A fresh read that finds them changed (revised by the
+	 * Planner or a teammate, or made stale by an edit) approves nothing and asks for review again;
+	 * the server refuses the start too if they change between the read and the request.
+	 */
+	let approve = () => {
+		let shownGraph = snapshot?.graph;
+		if (!snapshot || !shownGraph) return;
+		let shown: Reviewed = {
+			planRevision: snapshot.planRevision,
+			graphVersion: shownGraph.number,
+			graphRevision: shownGraph.revision,
+		};
+		setReviewChanged(false);
+		let go = () => {
+			reviewed.current = shown;
+			dispatch({ type: "approve" });
+		};
+		read().then(fresh => {
+			let graph = fresh.graph;
+			if (
+				!graph || fresh.planRevision !== shown.planRevision
+				|| graph.number !== shown.graphVersion || graph.revision !== shown.graphRevision
+			) {
+				// Back from a refused start too (Retry), so the changed tasks show for review again,
+				// or Build plan when an edit left them out of date.
+				dispatch({ type: "reset" });
+				setReviewChanged(true);
+				return;
+			}
+			go();
+		}, go);
+	};
+	useEffect(() => {
+		if (look.kind !== "review") setReviewChanged(false);
+	}, [look.kind]);
 	return {
 		snapshot,
 		loadError,
 		look,
 		tabReady: enabled && buildTabReady(snapshot, look),
 		needsAgent: state.stage === "failed" && !!state.agent,
-		busy: state.stage === "drafting" || state.stage === "starting",
+		busy: state.stage === "drafting" || state.stage === "starting" || state.stage === "approving",
 		press() {
-			// The press drafts or starts against the latest revision, never a stale read.
+			// The press drafts against the latest revision, never a stale read.
 			void read().catch(() => {}).finally(() => dispatch({ type: "press" }));
 		},
+		approve,
+		retry() {
+			let phase = buildPhase(snapshot);
+			if (phase.kind === "review" || phase.kind === "failed") approve();
+			else void read().catch(() => {}).finally(() => dispatch({ type: "press" }));
+		},
+		reviewChanged,
 		rebuild() {
 			if (rebuilding) return;
 			setRebuilding(true);
@@ -429,6 +488,17 @@ export function BuildPlanButton(
 	useEffect(() => {
 		if (compact && build.rebuildError) onOpen();
 	}, [build.rebuildError]);
+	// A Build plan press this browser made lands its tasks in Build, for review before approval.
+	let reviewWanted = useRef(false);
+	useEffect(() => {
+		if (look.kind !== "review" || !reviewWanted.current) return;
+		reviewWanted.current = false;
+		onOpen();
+	}, [look.kind]);
+	// Approve plan found the tasks changed and approved nothing: show them, with the reason, in Build.
+	useEffect(() => {
+		if (build.reviewChanged) onOpen();
+	}, [build.reviewChanged]);
 	useLayoutEffect(() => {
 		let was = previous.current;
 		previous.current = look.kind;
@@ -481,39 +551,43 @@ export function BuildPlanButton(
 			</>
 		);
 	}
-	if (look.kind === "plan") {
+	if (look.kind === "plan" || look.kind === "review") {
 		if (!canEdit) return null;
+		let reviewing = look.kind === "review";
+		let name = buildLabel(look);
 		let blocked = look.blocked;
-		// The chosen machine is offline: dimmed, still focusable,
-		// with the reason only in its accessible description. Pressing it does nothing.
+		// The chosen machine is offline: dimmed, still focusable, with the reason only in its
+		// accessible description. Pressing it does nothing, not even the Planner's draft.
 		let offline = blocked ? undefined : machineOffline;
+		let tip = blocked ?? (look.kind === "review" && !offline ? look.tip : undefined);
 		return (
 			<>
 				<button
-					aria-label="Build plan"
+					aria-label={name}
 					aria-describedby={blocked || offline ? reason : undefined}
 					aria-disabled={blocked || offline ? true : undefined}
 					className={`${
 						phone ? "build-status-link" : "btn btn-md btn-primary build-plan shrink-0"
 					}${offline ? " machine-offline" : ""}`}
-					data-tooltip={blocked === PLANNER_OFF
-						? `${PLANNER_NAME} is off`
-						: blocked}
-					data-tooltip-detail={blocked ? "" : undefined}
-					data-tooltip-verbatim={blocked ? "" : undefined}
+					data-tooltip={blocked === PLANNER_OFF ? `${PLANNER_NAME} is off` : tip}
+					data-tooltip-detail={tip ? "" : undefined}
+					data-tooltip-verbatim={tip ? "" : undefined}
 					onClick={() => {
 						if (blocked) {
 							onExplain?.(blocked);
 							return;
 						}
-						// Nothing starts, not even the Planner's draft, on a machine that is offline.
 						if (offline) return;
 						pressed.current = true;
-						build.press();
+						if (reviewing) build.approve();
+						else {
+							reviewWanted.current = true;
+							build.press();
+						}
 					}}
 					type="button"
 				>
-					Build plan
+					{name}
 				</button>
 				{(blocked || offline) && <span className="sr-only" id={reason}>{blocked ?? offline}</span>}
 				{live}
@@ -525,7 +599,7 @@ export function BuildPlanButton(
 	let label = connectAgent && look.kind === "agent" ? "Agent offline" : buildLabel(look);
 	let blocked = look.kind === "stale" || look.kind === "failed" ? look.blocked : undefined;
 	let action = (look.kind === "stopped" || look.kind === "agent") && look.retry && canEdit
-		? { name: "Retry", run: build.press }
+		? { name: "Retry", run: build.retry }
 		: look.kind === "failed" && look.retry && canEdit
 		? { name: "Retry", run: build.rebuild }
 		: look.kind === "stale" && look.build && canEdit
